@@ -224,6 +224,7 @@ struct ConfigResponse<'a> {
     query_values_default_num: i64,
     alert_preview_timerange_minutes: i64,
     incidents_enabled: bool,
+    incidents_rca_enabled: bool,
     downtimes_enabled: bool,
     alert_calibration_enabled: bool,
     service_streams_enabled: bool,
@@ -475,6 +476,11 @@ pub async fn zo_config(
         o2cfg.ai.enabled && o2cfg.ai.has_agent_target() && o2cfg.ai.chat_persistence_enabled
     );
     let incidents_enabled = enterprise_value!(false, o2cfg.incidents.enabled);
+    // Incident analysis needs RCA on and an agent to answer (RR-43).
+    let incidents_rca_enabled = enterprise_value!(
+        false,
+        o2cfg.incidents.enabled && o2cfg.incidents.rca_enabled && o2cfg.ai.has_agent_target()
+    );
     let downtimes_enabled = enterprise_value!(false, o2cfg.downtimes.enabled);
     let alert_calibration_enabled = enterprise_value!(false, o2cfg.alert_calibration.enabled);
     let service_streams_enabled = enterprise_value!(false, o2cfg.service_streams.enabled);
@@ -603,6 +609,7 @@ pub async fn zo_config(
         query_values_default_num: cfg.limit.query_values_default_num,
         alert_preview_timerange_minutes: cfg.limit.alert_preview_timerange_minutes,
         incidents_enabled,
+        incidents_rca_enabled,
         downtimes_enabled,
         alert_calibration_enabled,
         service_streams_enabled,
@@ -2491,6 +2498,24 @@ mod tests {
         assert_eq!(
             json["ingest_allowed_in_future"],
             cfg.limit.ingest_allowed_in_future
+        );
+    }
+
+    /// RR-43: `/config` says whether incident analysis can run at all.
+    #[cfg(feature = "enterprise")]
+    #[tokio::test]
+    async fn test_zo_config_serves_incidents_rca_enabled() {
+        let o2cfg = o2_enterprise::enterprise::common::config::get_config();
+        let response = zo_config(Path("default".to_string()), None)
+            .await
+            .into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["incidents_rca_enabled"],
+            o2cfg.incidents.enabled && o2cfg.incidents.rca_enabled && o2cfg.ai.has_agent_target()
         );
     }
 }

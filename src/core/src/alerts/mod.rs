@@ -63,6 +63,8 @@ pub mod org_config;
 #[cfg(feature = "enterprise")]
 pub mod prebuilt;
 mod prom_rule;
+#[cfg(feature = "enterprise")]
+pub mod rca_runs;
 pub mod recovery;
 pub mod scheduler;
 pub mod templates;
