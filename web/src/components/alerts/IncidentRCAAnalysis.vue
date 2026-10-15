@@ -250,7 +250,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       <div
         data-test="rca-stream-content"
         class="rca-content text-sm whitespace-pre-wrap"
-        v-html="sanitize(formattedRcaContent)"
+        v-html="formattedRcaContent"
       />
     </div>
 
@@ -264,7 +264,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       <div
         data-test="rca-existing-content"
         class="rca-content text-sm whitespace-pre-wrap"
-        v-html="sanitize(formattedRcaContent)"
+        v-html="formattedRcaContent"
       />
     </div>
   </div>
@@ -273,7 +273,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 <script lang="ts">
 import { defineComponent, computed } from "vue";
 import { useI18nTyped } from "@/types/i18n";
-import DOMPurify from "dompurify";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OBanner from "@/lib/feedback/Banner/OBanner.vue";
@@ -378,18 +377,16 @@ export default defineComponent({
 
     const formatArchivedAt = (micros: number): string => new Date(micros / 1000).toLocaleString();
 
-    const sanitize = (html: string): string => DOMPurify.sanitize(html);
-
-    return { t, isRunning, analyzedAgoLabel, formatArchivedAt, sanitize };
+    return { t, isRunning, analyzedAgoLabel, formatArchivedAt };
   },
 });
 </script>
 
 <style scoped>
 /* keep(generated-content): the RCA report is markdown rendered through
-   `v-html="sanitize(formattedRcaContent)"` above — the .rca-report-content wrapper
-   and all of its children are built as an HTML string in IncidentDetailDrawer.vue
-   (formatRcaContent), so there is no template to hang Tailwind utilities on. This
+   `v-html="formattedRcaContent"` above — the .rca-report-content wrapper and all
+   of its children are built and sanitized as an HTML string by renderRcaReport in
+   utils/incidents/rcaReportMarkdown.ts, so there is no template to hang Tailwind utilities on. This
    is ladder step 5 of O2_STYLE_MIGRATION_PLAN.md §3.1.
 
    Moved out of the token layer (W1.a, F9), tokenised in W2.c. `:deep()` is required
@@ -413,7 +410,6 @@ export default defineComponent({
   --rca-text-heading: var(--color-blue-600);
   --rca-text-code: var(--color-status-error-text);
   --rca-text-blockquote: var(--color-blue-800);
-  --rca-text-strong: var(--color-blue-800);
   --rca-text-em: var(--color-text-secondary);
   --rca-text-list: var(--color-text-body);
 
@@ -448,7 +444,6 @@ export default defineComponent({
 
   --rca-text-heading: var(--color-blue-400);
   --rca-text-blockquote: var(--color-blue-400);
-  --rca-text-strong: var(--color-blue-400);
 
   --rca-border-secondary: var(--color-border-default);
   --rca-border-table: var(--color-border-default);
@@ -614,8 +609,9 @@ export default defineComponent({
     border-top-color: var(--rca-border-tertiary);
   }
 
+  /* Emphasis, not a link: same colour as the prose around it. */
   strong {
-    color: var(--rca-text-strong);
+    color: var(--rca-text-secondary);
   }
 
   em {
