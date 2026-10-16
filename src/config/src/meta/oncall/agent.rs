@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::policy::Channel;
+use super::{confidence::ConfidenceGrade, policy::Channel};
 use crate::meta::alerts::priority::AlertPriority;
 
 /// Shortest triage hold a team may configure. The agent's pre-flight takes
@@ -89,13 +89,13 @@ pub struct SuspectChange {
     pub occurred_at: i64,
 }
 
-/// One re-runnable claim: the query, panel or commit behind a finding. A
-/// receipt, not an assertion — a responder who distrusts the agent still lands
-/// on the right panels.
+/// One verified evidence entry the verdict cites, by its number in the run's
+/// evidence list (VE39). The label is built by code from the entry; the link is
+/// built by the UI from the entry's target, so no URL is stored here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct EvidenceLink {
+pub struct EvidenceRef {
+    pub number: u32,
     pub label: String,
-    pub url: String,
 }
 
 /// What the agent recommends the engine do about paging. A recommendation,
@@ -214,8 +214,10 @@ pub struct AnalysisVerdict {
     /// Identity-dimension paths, the same vocabulary routing uses.
     #[serde(default)]
     pub impacted_services: Vec<String>,
+    /// Up to five decisive evidence entries, in number order. Rows written
+    /// before VE39 carried `evidence_links`; they read with this empty.
     #[serde(default)]
-    pub evidence_links: Vec<EvidenceLink>,
+    pub evidence: Vec<EvidenceRef>,
     pub page_recommendation: PageRecommendation,
     /// Candidates only; execution is out of scope.
     #[serde(default)]
@@ -256,6 +258,10 @@ pub struct AnalysisState {
     pub status: AnalysisStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verdict: Option<AnalysisVerdict>,
+    /// The code-graded confidence behind `verdict.confidence`, kept for display
+    /// (CG §5.6). Absent on rows written before grading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<ConfidenceGrade>,
     /// When the run was asked for. The hold is measured from this, not from the
     /// clock at a re-queue, so a node dying mid-TRIAGE resumes the same
     /// deadline.
@@ -1005,9 +1011,14 @@ pub fn verdict_lines(analysis: &AnalysisState, decision: &SeverityDecision) -> V
         return Vec::new();
     };
 
+    let band = analysis
+        .grade
+        .as_ref()
+        .map(ConfidenceGrade::reason_line)
+        .unwrap_or_else(|| verdict.confidence.to_string());
     let mut lines = vec![format!(
-        "probable cause: {} ({})",
-        verdict.probable_cause, verdict.confidence
+        "probable cause: {} ({band})",
+        verdict.probable_cause
     )];
     if let Some(change) = &verdict.suspect_change {
         let who = change
@@ -1026,8 +1037,8 @@ pub fn verdict_lines(analysis: &AnalysisState, decision: &SeverityDecision) -> V
             verdict.impacted_services.join(", ")
         ));
     }
-    for link in &verdict.evidence_links {
-        lines.push(format!("· {} — {}", link.label, link.url));
+    for evidence in &verdict.evidence {
+        lines.push(format!("· [{}] {}", evidence.number, evidence.label));
     }
     lines.push(format!(
         "recommendation: {} — {}",
@@ -1171,9 +1182,9 @@ mod tests {
                 occurred_at: FIRED_AT - 6 * 3_600 * SECOND,
             }),
             impacted_services: vec!["production/openobserve".into()],
-            evidence_links: vec![EvidenceLink {
-                label: "fd ratio per pod".into(),
-                url: "https://o2.example/short/x7h3k2".into(),
+            evidence: vec![EvidenceRef {
+                number: 1,
+                label: "[1] Log query · production/openobserve · fd ratio per pod".into(),
             }],
             page_recommendation: PageRecommendation {
                 action,
@@ -1193,6 +1204,7 @@ mod tests {
         AnalysisState {
             status: AnalysisStatus::Pending,
             verdict: None,
+            grade: None,
             requested_at: Some(requested_at),
             completed_at: None,
         }
@@ -1202,6 +1214,7 @@ mod tests {
         AnalysisState {
             status: AnalysisStatus::Complete,
             verdict: Some(v),
+            grade: None,
             requested_at: Some(requested_at),
             completed_at: Some(at),
         }
@@ -1211,6 +1224,7 @@ mod tests {
         AnalysisState {
             status,
             verdict: None,
+            grade: None,
             requested_at: Some(requested_at),
             completed_at: None,
         }
@@ -2147,6 +2161,7 @@ mod tests {
         let unrequested = AnalysisState {
             status: AnalysisStatus::Pending,
             verdict: None,
+            grade: None,
             requested_at: None,
             completed_at: None,
         };
@@ -2718,6 +2733,7 @@ mod tests {
                     &AnalysisState {
                         status: AnalysisStatus::Complete,
                         verdict: None,
+                        grade: None,
                         requested_at: Some(FIRED_AT),
                         completed_at: Some(FIRED_AT + 4 * SECOND),
                     },
@@ -3381,7 +3397,7 @@ mod tests {
             confidence: Confidence::Low,
             suspect_change: None,
             impacted_services: vec![],
-            evidence_links: vec![],
+            evidence: vec![],
             page_recommendation: PageRecommendation {
                 action: PageAction::Page,
                 severity_suggestion: None,
@@ -3423,6 +3439,7 @@ mod tests {
         let skipped = AnalysisState {
             status: AnalysisStatus::Skipped,
             verdict: None,
+            grade: None,
             requested_at: None,
             completed_at: None,
         };
@@ -3477,5 +3494,76 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_string(&m).unwrap(), format!("\"{want}\""));
         }
+    }
+
+    /// VE39: evidence lines print `· [n] <label>` and never a URL; the reason line
+    /// replaces the bare band when the state carries a grade (CG §5.6).
+    #[test]
+    fn test_verdict_lines_print_numbered_evidence_and_the_reason_line() {
+        use crate::meta::oncall::confidence::{GradeReason, SignalClass};
+        let mut v = verdict(PageAction::Page, None);
+        v.confidence = Confidence::Medium;
+        v.evidence = vec![EvidenceRef {
+            number: 1,
+            label: "PromQL · prom_checkout · orders pool at 100/100".into(),
+        }];
+        let mut state = complete(FIRED_AT, FIRED_AT + SECOND, v);
+        let unchanged = SeverityDecision::Unchanged { current: P3 };
+        let lines = verdict_lines(&state, &unchanged);
+        assert!(
+            lines.contains(&"· [1] PromQL · prom_checkout · orders pool at 100/100".to_string()),
+            "{lines:?}"
+        );
+        assert!(lines.iter().all(|l| !l.contains("http")), "{lines:?}");
+        assert_eq!(
+            lines[0],
+            "probable cause: fd leak introduced by querier v0.14.2 (medium)"
+        );
+
+        state.grade = Some(ConfidenceGrade {
+            band: Confidence::Medium,
+            claimed: Confidence::High,
+            graded: Confidence::Medium,
+            reasons: vec![
+                GradeReason::DecisiveClass,
+                GradeReason::SuspectChangeNotRead,
+            ],
+            decisive_classes: vec![SignalClass::Metrics],
+            ruled_out: vec![],
+            unverified: vec![],
+            subject_id: Some("h1".into()),
+        });
+        let lines = verdict_lines(&state, &unchanged);
+        assert_eq!(
+            lines[0],
+            "probable cause: fd leak introduced by querier v0.14.2 (medium · claimed high · decisive: metrics · capped: suspect change not read)"
+        );
+
+        // F3: the grade round-trips; `{"status":"skipped"}` stays exact (pinned above).
+        let back: AnalysisState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(back, state);
+    }
+
+    /// VE39: an escalation row written before VE39 holds `evidence_links`; it reads
+    /// with an empty `evidence` list.
+    #[test]
+    fn test_an_old_row_with_evidence_links_reads_with_no_evidence() {
+        let old = serde_json::json!({
+            "status": "complete",
+            "verdict": {
+                "probable_cause": "fd leak",
+                "confidence": "high",
+                "impacted_services": [],
+                "evidence_links": [{"label": "fd ratio", "url": "https://example.com/x"}],
+                "page_recommendation": {"action": "page", "reason": "r"},
+                "report_ref": "inc_9/rca/1"
+            }
+        });
+        let state: AnalysisState = serde_json::from_value(old).unwrap();
+        let v = state.verdict.unwrap();
+        assert!(v.evidence.is_empty());
+        assert_eq!(v.confidence, Confidence::High);
+        assert_eq!(state.grade, None);
     }
 }
