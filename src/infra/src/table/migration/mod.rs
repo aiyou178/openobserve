@@ -223,6 +223,7 @@ mod m20261009_000005_create_downtime_notifications;
 mod m20261012_000001_create_alert_calibration_configs;
 mod m20261016_000001_create_rca_runs;
 mod m20261016_000002_backfill_rca_runs;
+mod m20261017_000001_add_rca_run_progress_columns;
 /// Shared body of the two `folder_id` migrations above; not a migration itself.
 mod workflow_folder_id;
 
@@ -575,6 +576,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261007_000002_add_redact_tools_to_ai_chat_shares::Migration),
             Box::new(m20261016_000001_create_rca_runs::Migration),
             Box::new(m20261016_000002_backfill_rca_runs::Migration),
+            Box::new(m20261017_000001_add_rca_run_progress_columns::Migration),
         ]
     }
 }
@@ -643,6 +645,7 @@ mod tests {
         (107, "m20261007_000002_add_redact_tools_to_ai_chat_shares"),
         (108, "m20261016_000001_create_rca_runs"),
         (109, "m20261016_000002_backfill_rca_runs"),
+        (110, "m20261017_000001_add_rca_run_progress_columns"),
     ];
 
     // Two branches that each claim the next version merge cleanly, so a reused number must fail
@@ -788,6 +791,10 @@ mod tests {
             (
                 "m20261016_000001_create_rca_runs",
                 "m20261016_000002_backfill_rca_runs",
+            ),
+            (
+                "m20261016_000001_create_rca_runs",
+                "m20261017_000001_add_rca_run_progress_columns",
             ),
         ] {
             assert!(

@@ -139,6 +139,11 @@ pub async fn create(
         field_found = true;
     }
 
+    if let Some(ai_rca_thread_tool_output) = settings.ai_rca_thread_tool_output {
+        field_found = true;
+        data.ai_rca_thread_tool_output = ai_rca_thread_tool_output;
+    }
+
     if let Some(cross_links) = settings.cross_links {
         for link in &cross_links {
             if link.name.is_empty() {
