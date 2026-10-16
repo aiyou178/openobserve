@@ -107,7 +107,8 @@ pub type RwBTreeMap<K, V> = tokio::sync::RwLock<BTreeMap<K, V>>;
 // 107: add redact_tools to ai_chat_shares.
 // 108: create rca_runs and add the run summary columns to alert_incidents.
 // 109: backfill rca_runs from topology_context reports and incident_events.
-pub const DB_SCHEMA_VERSION: u64 = 110;
+// 111: create rca_steering and add the input columns to rca_runs.
+pub const DB_SCHEMA_VERSION: u64 = 111;
 pub const DB_SCHEMA_KEY: &str = "/db_schema_version/";
 
 // global version variables

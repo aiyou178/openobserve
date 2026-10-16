@@ -66,6 +66,8 @@ mod prom_rule;
 #[cfg(feature = "enterprise")]
 pub mod rca_runs;
 #[cfg(feature = "enterprise")]
+pub mod rca_steering;
+#[cfg(feature = "enterprise")]
 pub mod rca_turn;
 pub mod recovery;
 pub mod scheduler;

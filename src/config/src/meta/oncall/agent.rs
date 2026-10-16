@@ -3532,6 +3532,7 @@ mod tests {
             ruled_out: vec![],
             unverified: vec![],
             subject_id: Some("h1".into()),
+            lead_author: None,
         });
         let lines = verdict_lines(&state, &unchanged);
         assert_eq!(
