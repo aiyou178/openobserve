@@ -64,6 +64,8 @@ pub mod org_config;
 pub mod prebuilt;
 mod prom_rule;
 #[cfg(feature = "enterprise")]
+pub mod rca_live;
+#[cfg(feature = "enterprise")]
 pub mod rca_resume;
 #[cfg(feature = "enterprise")]
 pub mod rca_runs;
