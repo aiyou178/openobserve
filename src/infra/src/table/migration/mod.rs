@@ -222,7 +222,6 @@ mod m20261009_000004_add_kind_to_slo_backfill_jobs;
 mod m20261009_000005_create_downtime_notifications;
 mod m20261012_000001_create_alert_calibration_configs;
 mod m20261016_000001_create_rca_runs;
-mod m20261016_000002_backfill_rca_runs;
 mod m20261017_000001_add_rca_run_progress_columns;
 mod m20261018_000001_create_rca_steering;
 mod m20261019_000001_create_rca_feedback;
@@ -577,7 +576,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20261007_000001_create_ai_chat_turns::Migration),
             Box::new(m20261007_000002_add_redact_tools_to_ai_chat_shares::Migration),
             Box::new(m20261016_000001_create_rca_runs::Migration),
-            Box::new(m20261016_000002_backfill_rca_runs::Migration),
             Box::new(m20261017_000001_add_rca_run_progress_columns::Migration),
             Box::new(m20261018_000001_create_rca_steering::Migration),
             Box::new(m20261019_000001_create_rca_feedback::Migration),
@@ -648,7 +646,6 @@ mod tests {
         (106, "m20261007_000001_create_ai_chat_turns"),
         (107, "m20261007_000002_add_redact_tools_to_ai_chat_shares"),
         (108, "m20261016_000001_create_rca_runs"),
-        (109, "m20261016_000002_backfill_rca_runs"),
         (110, "m20261017_000001_add_rca_run_progress_columns"),
         (111, "m20261018_000001_create_rca_steering"),
         (112, "m20261019_000001_create_rca_feedback"),
@@ -789,14 +786,6 @@ mod tests {
             (
                 "m20251204_000001_create_alert_incidents_table",
                 "m20261016_000001_create_rca_runs",
-            ),
-            (
-                "m20260214_000001_create_incident_events_table",
-                "m20261016_000002_backfill_rca_runs",
-            ),
-            (
-                "m20261016_000001_create_rca_runs",
-                "m20261016_000002_backfill_rca_runs",
             ),
             (
                 "m20261016_000001_create_rca_runs",
