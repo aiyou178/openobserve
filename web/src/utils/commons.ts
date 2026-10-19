@@ -29,6 +29,7 @@ import { normalizeReservedTimestampAlias } from "./dashboard/timestampAliasRewri
 import commonService from "../services/common";
 import type { TranslateFn } from "@/types/i18n";
 import type { Ref } from "vue";
+import { pruneAnnotationSourcePanels } from "@/utils/dashboard/pruneAnnotationSourcePanels";
 
 let moment: any;
 let momentInitialized = false;
@@ -540,6 +541,8 @@ export const updateDashboard = async (
   currentDashboardData: any,
   folderId: any,
 ) => {
+  // Every panel deletion path ends here, so a deleted panel never lingers in an annotation source.
+  pruneAnnotationSourcePanels(currentDashboardData);
   const res = await dashboardService.save(
     org,
     dashboardId,

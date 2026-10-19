@@ -541,6 +541,7 @@ import {
 } from "vue";
 import { useStore } from "vuex";
 import { useI18nTyped } from "@/types/i18n";
+import { ANNOTATION_PREVIEW_CONTEXT_KEY } from "@/composables/dashboard/useDashboardAnnotationSources";
 import ShareButton from "@/components/common/ShareButton.vue";
 import analytics from "@/services/product_analytics";
 import DateTimePickerDashboard from "@/components/DateTimePickerDashboard.vue";
@@ -795,6 +796,10 @@ export default defineComponent({
 
     const { isAutoRunAvailable, isAutoRunOn, toggleAutoRun } = useAutoRunToggle();
     provide("dashboardAutoRun", isAutoRunOn);
+    provide(ANNOTATION_PREVIEW_CONTEXT_KEY, {
+      timeRange: () => currentTimeObjPerPanel.value?.__global,
+      variables: () => variablesManager.value?.committedVariablesData?.global ?? [],
+    });
 
     // variables data
     const variablesData = reactive({});
