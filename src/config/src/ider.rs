@@ -158,6 +158,11 @@ pub fn generate_span_id() -> String {
     hex
 }
 
+/// Per-request `{trace_id}-{16 hex}` id that a cancel by the `trace_id` prefix still reaches.
+pub fn generate_query_id(trace_id: &str) -> String {
+    format!("{trace_id}-{}", generate_span_id())
+}
+
 /// Convert a snowflake id to a timestamp in milliseconds.
 pub fn to_timestamp_millis(id: i64) -> i64 {
     id >> 22
@@ -559,6 +564,20 @@ mod tests {
         let uuid2 = uuid();
         assert_ne!(uuid1, uuid2, "Generated UUIDs should be unique");
         assert_eq!(uuid1.len(), 27, "KSUID should be 27 characters long");
+    }
+
+    #[test]
+    fn test_generate_query_id_keeps_trace_prefix_and_is_unique() {
+        let trace_id = generate_trace_id();
+        let a = generate_query_id(&trace_id);
+        let b = generate_query_id(&trace_id);
+        assert_ne!(a, b);
+        for id in [&a, &b] {
+            let (prefix, suffix) = id.split_once('-').unwrap();
+            assert_eq!(prefix, trace_id);
+            assert_eq!(suffix.len(), 16);
+            assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
+        }
     }
 
     #[test]

@@ -90,7 +90,8 @@ pub async fn search(
     timeout: i64,
     is_super_cluster: bool,
 ) -> Result<SearchResponse> {
-    let trace_id = search_service::leader_trace_id(trace_id);
+    // callers such as Grafana share one trace_id across concurrent requests
+    let trace_id = config::ider::generate_query_id(&search_service::leader_trace_id(trace_id));
     let trace_id = trace_id.as_str();
     #[cfg(feature = "enterprise")]
     {

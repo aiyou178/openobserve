@@ -140,10 +140,12 @@ pub async fn search(
     #[cfg(feature = "enterprise")]
     let req_clusters = in_req.clusters.clone();
 
+    // callers may share one trace_id across concurrent requests, e.g. Grafana via traceparent
+    let query_id = ider::generate_query_id(&trace_id);
     let query: SearchQuery = in_req.query.clone().into();
     let req_query = query.clone();
     let mut request = config::datafusion::request::Request::new(
-        trace_id.clone(),
+        query_id.clone(),
         org_id.to_string(),
         stream_type,
         in_req.timeout,
@@ -176,7 +178,7 @@ pub async fn search(
         SEARCH_SERVER
             .insert(
                 org_id,
-                trace_id.clone(),
+                query_id.clone(),
                 TaskStatus::new_leader(
                     vec![],
                     true,
@@ -222,7 +224,7 @@ pub async fn search(
     let mut _work_group = None;
     #[cfg(feature = "enterprise")]
     {
-        if let Some((_, stat)) = SEARCH_SERVER.remove(org_id, &trace_id).await
+        if let Some((_, stat)) = SEARCH_SERVER.remove(org_id, &query_id).await
             && let Some(wg) = stat.work_group.as_ref()
         {
             _work_group = Some(wg.to_string());

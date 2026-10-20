@@ -138,7 +138,7 @@ async fn register_follower(
     trace_id: &str,
 ) -> (MetricsQueryRequest, String) {
     // one query sends a request per selector, so concurrent requests must not share an entry
-    let follower_id = format!("{trace_id}-{}", config::ider::generate_span_id());
+    let follower_id = config::ider::generate_query_id(trace_id);
     if let Some(job) = req.job.as_mut() {
         job.trace_id = follower_id.clone();
     }
