@@ -95,7 +95,14 @@ pub fn mark_otel_layer_installed() {
 }
 
 /// Server middleware filter; without an OTel layer `set_parent` WARNs on every request.
-pub fn otel_middleware_enabled(_path: &str) -> bool {
+pub fn otel_middleware_enabled(path: &str) -> bool {
+    if path
+        .split('?')
+        .next()
+        .is_some_and(|p| p.contains("/auth/oidc/"))
+    {
+        return false;
+    }
     middleware_span_wanted(OTEL_LAYER_INSTALLED.load(Ordering::Relaxed))
 }
 

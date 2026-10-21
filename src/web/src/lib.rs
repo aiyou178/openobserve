@@ -13,27 +13,49 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Embeds the built web UI (`web/dist`) into the binary.
-//!
-//! This lives in its own leaf crate so the expensive embed + compression
-//! macro expansion only re-runs when `web/dist` changes, not on every
-//! rebuild of the API crate.
-//!
-//! For that to hold, the dependency list here must stay small and stable:
-//! anything this crate depends on drags the ~50MB embed through LLVM again
-//! whenever it changes. `config` in particular used to be a dependency, which
-//! meant every `config` edit paid the embed cost. Config values the UI routes
-//! need are passed in as arguments instead — see [`ui_routes`].
-
-use rust_embed_for_web::RustEmbed;
+//! Keeps embedded UI assets isolated from API dependency rebuilds.
 
 mod ui;
 
+#[cfg(debug_assertions)]
+use rust_embed_for_web::RustEmbed;
 pub use ui::ui_routes;
 
+const SOURCE_ARCHIVE: Option<(&str, &[u8])> =
+    include!(concat!(env!("OUT_DIR"), "/source_archive.rs"));
+
+#[cfg(not(debug_assertions))]
+const WEB_ASSETS: &[(&str, rust_embed_for_web::EmbeddedFile)] =
+    include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
+
+#[cfg(debug_assertions)]
 #[derive(RustEmbed)]
 #[folder = "../../web/dist/"]
+#[exclude = "assets/openobserve-source-*.tar.gz"]
+#[exclude = "assets/source-*.tar.gz"]
 #[allow_missing = true]
 #[gzip = false]
 #[br = false]
 pub struct WebAssets;
+
+#[cfg(not(debug_assertions))]
+pub struct WebAssets;
+
+#[cfg(not(debug_assertions))]
+impl WebAssets {
+    fn get(path: &str) -> Option<rust_embed_for_web::EmbeddedFile> {
+        WEB_ASSETS
+            .binary_search_by_key(&path, |entry| entry.0)
+            .ok()
+            .map(|index| WEB_ASSETS[index].1)
+    }
+}
+
+#[cfg(not(debug_assertions))]
+impl rust_embed_for_web::RustEmbed for WebAssets {
+    type File = rust_embed_for_web::EmbeddedFile;
+
+    fn get(file_path: &str) -> Option<Self::File> {
+        Self::get(file_path)
+    }
+}

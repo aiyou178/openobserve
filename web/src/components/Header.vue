@@ -339,6 +339,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               </ODropdownItem>
               <ODropdownSeparator />
 
+              <ODropdownItem data-test="menu-link-source-item" @select="openSource">
+                {{ t("login.source") }}
+              </ODropdownItem>
+              <ODropdownSeparator />
+
               <!-- About page link -->
               <ODropdownItem data-test="menu-link-about-item" @select="goToAbout">
                 {{ t(`menu.about`) }}
@@ -498,6 +503,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script lang="ts">
+import { sourceUrl } from "@/services/ossOidc";
 import { defineComponent, PropType, computed, nextTick, ref } from "vue";
 import { useRouter } from "vue-router";
 import { raw, useI18nTyped } from "@/types/i18n";
@@ -628,6 +634,7 @@ export default defineComponent({
   setup(props, { emit }) {
     const { t } = useI18nTyped();
     const { featureName } = useFeatureNames();
+    const openSource = () => window.open(sourceUrl, "_blank", "noopener,noreferrer");
     const router = useRouter();
     const { isDark } = useTheme();
 
@@ -858,6 +865,7 @@ export default defineComponent({
     };
 
     return {
+      openSource,
       isDark,
       t,
       raw,

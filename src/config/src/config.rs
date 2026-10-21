@@ -1076,6 +1076,7 @@ impl<'de> Deserialize<'de> for FileFormatConfig {
 
 #[derive(Serialize, EnvConfig, Default)]
 pub struct Config {
+    pub oidc: Oidc,
     pub auth: Auth,
     pub http_streaming: HttpStreaming,
     pub report_server: ReportServer,
@@ -1141,6 +1142,15 @@ impl PublicAiChat {
             days => days.min(365),
         }
     }
+}
+
+#[derive(Serialize, EnvConfig, Default)]
+pub struct Oidc {
+    #[env_config(name = "ZO_OIDC_ENABLED", default = false)]
+    pub enabled: bool,
+    #[serde(skip_serializing)]
+    #[env_config(name = "ZO_OIDC_CONFIG_FILE", default = "")]
+    pub config_file: String,
 }
 
 /// Background self CPU/memory profile ingest into the `default` profiles stream.
