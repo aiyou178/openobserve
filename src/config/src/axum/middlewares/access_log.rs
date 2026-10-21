@@ -30,13 +30,14 @@ use tower::{Layer, Service};
 const SHARE_TOKEN_PREFIX: usize = 6;
 
 /// Request headers whose value is a credential and is never written to the log.
-const REDACTED_REQUEST_HEADERS: [&str; 6] = [
+const REDACTED_REQUEST_HEADERS: [&str; 7] = [
     "authorization",
     "proxy-authorization",
     "cookie",
     "x-api-key",
     "x-o2-mcp",
     "webhook-signature",
+    "x-o2-csrf",
 ];
 /// Workflow hook credentials; a URL value starting with one, in any case or encoding, is cut.
 const HOOK_CREDENTIAL_PREFIXES: [&str; 2] = ["o2wh_", "whsec_"];
@@ -285,11 +286,17 @@ where
                     let response_header_regex = Regex::new(r"%\{([^}]+)\}o").unwrap();
                     for cap in response_header_regex.captures_iter(&this.format.clone()) {
                         let header_name = &cap[1];
-                        let header_value = response_headers
-                            .iter()
-                            .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
-                            .map(|(_, value)| value.as_str())
-                            .unwrap_or("-");
+                        let header_value = if header_name.eq_ignore_ascii_case("set-cookie")
+                            || header_name.eq_ignore_ascii_case("location")
+                        {
+                            "[REDACTED]"
+                        } else {
+                            response_headers
+                                .iter()
+                                .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
+                                .map(|(_, value)| value.as_str())
+                                .unwrap_or("-")
+                        };
                         log_message =
                             log_message.replace(&format!("%{{{}}}o", header_name), header_value);
                     }
@@ -306,6 +313,10 @@ where
 
 /// `url` as the access log may write it: share tokens cut, Slack callback secrets dropped.
 pub fn mask_log_url(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    if path.contains("/auth/oidc/") {
+        return mask_share_tokens(path);
+    }
     mask_slack_callback_query(&mask_share_tokens(url))
 }
 

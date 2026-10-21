@@ -16,3 +16,5 @@
 use openobserve_api_common::auth;
 pub mod request;
 pub mod router;
+
+pub mod oidc;

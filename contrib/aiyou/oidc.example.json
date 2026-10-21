@@ -1,0 +1,10 @@
+{
+  "issuer": "https://idp.example.com/oidc",
+  "client_id": "REGISTERED_CONFIDENTIAL_CLIENT_ID",
+  "client_secret_file": "/run/secrets/openobserve-oidc-client",
+  "public_url": "https://observe.example.com",
+  "allow_insecure_loopback": false,
+  "idle_seconds": 1800,
+  "absolute_seconds": 28800,
+  "bindings": []
+}

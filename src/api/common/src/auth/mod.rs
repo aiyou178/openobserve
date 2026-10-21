@@ -15,5 +15,6 @@
 
 pub mod delegation;
 pub mod jwt;
+pub mod oidc;
 pub mod token;
 pub mod validator;

@@ -13,6 +13,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import { bootstrapOidc, oidcActive, logoutOidc } from "@/services/ossOidc";
+import { useLocalUserInfo, useLocalCurrentUser } from "@/utils/storage";
+import { b64EncodeStandard } from "@/utils/formatters";
 import { createRouter, createWebHistory } from "vue-router";
 import { getDecodedUserInfo, getPath, mergeRoutes } from "@/utils/zincutils";
 import { gt } from "@/types/i18n";
@@ -76,7 +79,7 @@ export default function (store: any) {
 
   const router = createRouter(routerMap);
 
-  router.beforeEach((to: any, from: any, next: any) => {
+  router.beforeEach(async (to: any, from: any, next: any) => {
     // Set page title with OpenObserve prefix.
     //
     // Routes carry an i18n KEY (`meta.titleKey`), not the text: the route tables
@@ -91,6 +94,54 @@ export default function (store: any) {
       document.title = `OpenObserve - ${routeTitle}`;
     } else {
       document.title = "OpenObserve";
+    }
+
+    try {
+      const session = await bootstrapOidc();
+      if (session.enabled && session.authenticated && session.user) {
+        if (to.path === "/logout") {
+          await logoutOidc();
+          await store.dispatch("logout");
+          useLocalUserInfo("", true);
+          useLocalCurrentUser("", true);
+          next({ path: "/login" });
+          return;
+        }
+        if (store.state.userInfo?.email !== session.user.email) {
+          await store.dispatch("logout");
+          useLocalUserInfo("", true);
+          useLocalCurrentUser("", true);
+        }
+        const user = {
+          email: session.user.email,
+          name: session.user.first_name,
+          given_name: session.user.first_name,
+          family_name: session.user.last_name,
+          role: "admin",
+        };
+        useLocalUserInfo(b64EncodeStandard(JSON.stringify(user)));
+        useLocalCurrentUser(JSON.stringify(user));
+        await store.dispatch("login", { loginState: true, userInfo: user });
+        await store.dispatch("setCurrentUser", user);
+        if (to.path === "/login") next({ path: "/" });
+        else next();
+        return;
+      }
+      if (oidcActive() || session.session_invalid) {
+        await logoutOidc();
+        await store.dispatch("logout");
+        useLocalUserInfo("", true);
+        useLocalCurrentUser("", true);
+        next({ path: "/login" });
+        return;
+      }
+    } catch {
+      if (oidcActive()) {
+        await store.dispatch("logout");
+        if (to.path === "/login") next();
+        else next({ path: "/login" });
+        return;
+      }
     }
 
     const isAuthenticated = store.state.loggedIn;

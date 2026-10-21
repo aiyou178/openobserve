@@ -506,7 +506,28 @@ where
     #[cfg(not(feature = "enterprise"))]
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let cookies = extract_cookies_from_headers(&parts.headers);
-        let auth_str = if let Some(cookie) = cookies.get("auth_tokens") {
+        let auth_str = if let Some(auth_header) = parts.headers.get("Authorization") {
+            auth_header
+                .to_str()
+                .map(|value| reject_forged_session_marker(value.to_owned()))
+                .unwrap_or_default()
+        } else if parts
+            .headers
+            .get_all(http::header::COOKIE)
+            .iter()
+            .any(|value| {
+                value.to_str().is_ok_and(|value| {
+                    value.split(';').any(|cookie| {
+                        cookie
+                            .trim()
+                            .split_once('=')
+                            .is_some_and(|(name, _)| name == "o2_oidc_session")
+                    })
+                })
+            })
+        {
+            String::new()
+        } else if let Some(cookie) = cookies.get("auth_tokens") {
             let val = config::utils::base64::decode_raw(cookie).unwrap_or_default();
             let auth_tokens: AuthTokens =
                 json::from_str(std::str::from_utf8(&val).unwrap_or_default()).unwrap_or_default();
@@ -516,14 +537,8 @@ where
             } else {
                 format!("Bearer {access_token}")
             }
-        } else if let Some(auth_header) = parts.headers.get("Authorization") {
-            if let Ok(auth_str) = auth_header.to_str() {
-                reject_forged_session_marker(auth_str.to_owned())
-            } else {
-                "".to_string()
-            }
         } else {
-            "".to_string()
+            String::new()
         };
 
         // if let Some(auth_header) = parts.headers.get("Authorization") {
@@ -1443,5 +1458,47 @@ mod tests {
             panic!("a cookie must never authenticate OpAMP");
         };
         assert_eq!(rejection.status_code, StatusCode::UNAUTHORIZED);
+    }
+
+    #[cfg(not(feature = "enterprise"))]
+    #[tokio::test]
+    async fn explicit_machine_authorization_wins_while_sso_blocks_legacy_cookie_fallback() {
+        let tokens = config::utils::base64::encode(
+            r#"{"access_token":"Basic stale-browser","refresh_token":""}"#,
+        );
+        let cookie = format!("auth_tokens={tokens}; o2_oidc_session=malformed");
+        let request = http::Request::builder()
+            .uri("/api/default/v1/logs")
+            .header(http::header::COOKIE, &cookie)
+            .header(http::header::AUTHORIZATION, "Basic explicit-machine")
+            .body(())
+            .unwrap();
+        let (mut parts, _) = request.into_parts();
+        assert_eq!(
+            AuthExtractor::from_request_parts(&mut parts, &())
+                .await
+                .ok()
+                .unwrap()
+                .auth,
+            "Basic explicit-machine"
+        );
+        parts.headers.remove(http::header::AUTHORIZATION);
+        assert!(
+            AuthExtractor::from_request_parts(&mut parts, &())
+                .await
+                .is_err()
+        );
+        parts.headers.insert(
+            http::header::COOKIE,
+            format!("auth_tokens={tokens}").parse().unwrap(),
+        );
+        assert_eq!(
+            AuthExtractor::from_request_parts(&mut parts, &())
+                .await
+                .ok()
+                .unwrap()
+                .auth,
+            "Basic stale-browser"
+        );
     }
 }
