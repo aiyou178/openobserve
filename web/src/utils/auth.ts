@@ -1,5 +1,6 @@
 // Copyright 2026 OpenObserve Inc.
 
+import { oidcActive, logoutOidc } from "@/services/ossOidc";
 import { orgSummaryQuery } from "@/services/organizations.queries";
 import { queryClient } from "@/composables/query/queryClient";
 import config from "../aws-exports";
@@ -51,7 +52,8 @@ export const getUserInfo = (loginString: string) => {
 };
 
 export const invalidateLoginData = () => {
-  userService.logout().then(() => {});
+  if (oidcActive()) return logoutOidc();
+  return userService.logout().then(() => {});
 };
 
 export const getDecodedAccessToken = (token: string) => {

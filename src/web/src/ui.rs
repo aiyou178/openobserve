@@ -24,7 +24,7 @@ use axum::{
 };
 use rust_embed_for_web::EmbedableFile;
 
-use crate::WebAssets;
+use crate::{SOURCE_ARCHIVE, WebAssets};
 
 /// Serve static files from embedded web assets
 pub async fn serve(Path(path): Path<String>) -> impl IntoResponse {
@@ -39,36 +39,49 @@ pub async fn serve(Path(path): Path<String>) -> impl IntoResponse {
         file_path = "index.html";
     }
 
+    if let Some((asset, data)) = SOURCE_ARCHIVE
+        && asset == file_path
+    {
+        return asset_response(file_path, Body::from(data));
+    }
+
     match WebAssets::get(file_path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
-            let data = content.data();
-
-            // Vite emits content-hashed filenames under assets/ and monacoeditorwork/,
-            // so those URLs are safe to cache forever. index.html must revalidate so
-            // users pick up new deploys. Everything else gets a short TTL.
-            let cache_control =
-                if file_path.starts_with("assets/") || file_path.starts_with("monacoeditorwork/") {
-                    "public, max-age=31536000, immutable"
-                } else if file_path == "index.html" {
-                    "no-cache"
-                } else {
-                    "public, max-age=3600"
-                };
-
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, mime.as_ref())
-                .header(header::CACHE_CONTROL, cache_control)
-                .header("X-Content-Type-Options", "nosniff")
-                .body(Body::from(data.to_vec()))
-                .unwrap()
-        }
+        Some(content) => asset_response(file_path, Body::from(content.data().to_vec())),
         None => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("Not Found"))
             .unwrap(),
     }
+}
+
+pub fn ui_routes(base_href: &str) -> Router {
+    Router::new()
+        .route("/", get(|| async { serve(Path("".to_string())).await }))
+        .route("/{*path}", get(serve))
+        .layer(middleware::from_fn_with_state(
+            base_href.to_string(),
+            base_href_middleware,
+        ))
+}
+
+fn asset_response(file_path: &str, body: Body) -> Response {
+    let mime = mime_guess::from_path(file_path).first_or_octet_stream();
+    // Content-addressed assets stay immutable while index.html must pick up new deployments.
+    let cache_control =
+        if file_path.starts_with("assets/") || file_path.starts_with("monacoeditorwork/") {
+            "public, max-age=31536000, immutable"
+        } else if file_path == "index.html" {
+            "no-cache"
+        } else {
+            "public, max-age=3600"
+        };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .header(header::CACHE_CONTROL, cache_control)
+        .header("X-Content-Type-Options", "nosniff")
+        .body(body)
+        .unwrap()
 }
 
 /// Middleware to rewrite base href in HTML responses
@@ -123,21 +136,6 @@ async fn base_href_middleware(
         }
         Err(_) => Response::from_parts(parts, Body::empty()),
     }
-}
-
-/// Create UI routes
-///
-/// `base_href` is the `<base href>` rewritten into the served HTML — the mount
-/// point of these routes, `"{ZO_BASE_URI}/web/"`. The caller resolves it so this
-/// crate does not have to depend on `config`.
-pub fn ui_routes(base_href: &str) -> Router {
-    Router::new()
-        .route("/", get(|| async { serve(Path("".to_string())).await }))
-        .route("/{*path}", get(serve))
-        .layer(middleware::from_fn_with_state(
-            base_href.to_string(),
-            base_href_middleware,
-        ))
 }
 
 #[cfg(test)]

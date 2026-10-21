@@ -257,6 +257,12 @@ fn attach_mcp_www_authenticate(_org_id: &str, resp: Response) -> Response {
 /// Pair it with `password_policy_middleware` layered inside it on every router that uses it: this
 /// one answers who the caller is, that one whether their password still entitles them to be here.
 pub async fn auth_middleware(request: Request, next: Next) -> Response {
+    if openobserve_api_common::auth::oidc::has_session_cookie(request.headers())
+        && !request.headers().contains_key(header::AUTHORIZATION)
+    {
+        return crate::handler::http::oidc::authenticate(request, next).await;
+    }
+
     // Extract request data FIRST, before any async calls
     // This ensures the future is Send because RequestData is Send + Sync
     let req_data = RequestData {
@@ -686,7 +692,9 @@ pub fn basic_routes() -> Router {
     let mut router = Router::new()
         .route("/healthz", get(status::healthz).head(status::healthz_head))
         .route("/schedulez", get(status::schedulez))
-        .route("/metrics", get(get_metrics));
+        .route("/metrics", get(get_metrics))
+        .route("/auth/oidc/bootstrap", get(crate::handler::http::oidc::bootstrap))
+        .route("/auth/oidc/logout", post(crate::handler::http::oidc::logout));
 
     #[cfg(feature = "cloud")]
     {
@@ -2203,6 +2211,10 @@ pub fn create_app_router(ui_routes: fn(&str) -> Router) -> Router {
             .merge(proxy_routes(true))
     };
 
+    if cfg.oidc.enabled {
+        app = app.merge(crate::handler::http::oidc::routes());
+    }
+
     // Ensure redirect takes into account base_uri
     let web_path = format!("{}/web/", cfg.common.base_uri);
     // Add UI routes at app level (outside basic_routes to avoid any middleware conflicts)
@@ -2294,6 +2306,53 @@ mod tests {
     /// A **static** second segment does not conflict, which is why every
     /// token-authenticated route here lives under `/api/v2/`. If you add one,
     /// it must too.
+    #[tokio::test]
+    async fn malformed_sso_cookie_cannot_fall_back_to_legacy_cookie_or_identity_headers() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+        let app = Router::new()
+            .route("/default/streams", get(|| async { "secret" }))
+            .layer(middleware::from_fn(auth_middleware));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/default/streams")
+                    .header(
+                        header::COOKIE,
+                        "o2_oidc_session=malformed; auth_tokens=stale",
+                    )
+                    .header("user_id", "root@example.invalid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!response.headers().contains_key(header::LOCATION));
+    }
+
+    #[tokio::test]
+    async fn human_sso_ingestion_failure_is_a_401_without_browser_redirect() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+        let app = Router::new()
+            .route("/default/v1/logs", post(|| async { "accepted" }))
+            .layer(middleware::from_fn(auth_middleware));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/default/v1/logs")
+                    .header(header::COOKIE, "o2_oidc_session=malformed")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!response.headers().contains_key(header::LOCATION));
+    }
+
     #[test]
     fn test_basic_routes_cannot_conflict_with_the_router_catch_all() {
         // Registration is where the panic would happen, so building it is the

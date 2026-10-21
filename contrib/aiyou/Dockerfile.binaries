@@ -1,0 +1,133 @@
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM node:24-bookworm AS nodebase
+
+FROM ubuntu:24.04 AS cachecheck
+ARG TARGETARCH
+ARG RUST_TOOLCHAIN
+ARG CACHE_PROBE_NONCE
+RUN --mount=type=cache,id=openobserve-binaries-${TARGETARCH}-${RUST_TOOLCHAIN},target=/cache,sharing=locked,readonly \
+    set -eu; \
+    test -n "$CACHE_PROBE_NONCE"; \
+    case "$TARGETARCH" in \
+      amd64) target=x86_64-unknown-linux-gnu ;; \
+      arm64) target=aarch64-unknown-linux-gnu ;; \
+      *) exit 1 ;; \
+    esac; \
+    test -s "/cache/$target/release-prod/openobserve"; \
+    test -d "/cache/$target/release-prod/deps"; \
+    test -n "$(find "/cache/$target/release-prod/deps" -maxdepth 1 -type f -name '*.rlib' -size +0c -print -quit)"; \
+    printf 'Reusable release-prod target cache: '; du -sk /cache
+
+FROM nodebase AS webbuilder
+WORKDIR /web
+COPY web/ ./
+ENV CYPRESS_INSTALL_BINARY=0 NODE_OPTIONS=--max-old-space-size=8192
+RUN npm ci
+ARG SOURCE_REVISION
+ARG VERSION
+RUN VITE_CORRESPONDING_SOURCE_URL="assets/openobserve-source-${SOURCE_REVISION}-${VERSION}.tar.gz" npm run build
+COPY corresponding-source/ /web/dist/assets/
+
+FROM ubuntu:24.04 AS builder
+ARG TARGETARCH
+ARG RUST_TOOLCHAIN
+ARG RUST_TOOLCHAIN_PIN
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:$PATH \
+    PROTOC=/usr/bin/protoc PROTOC_INCLUDE=/usr/include \
+    CARGO_INCREMENTAL=0
+COPY --from=nodebase /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install --no-install-recommends --yes \
+    build-essential ca-certificates clang cmake curl file git libclang-dev \
+    libprotobuf-dev libssl-dev llvm lld pkg-config protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 --fail --show-error --retry 3 \
+    https://sh.rustup.rs --output /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none \
+    && rm /tmp/rustup-init.sh
+RUN set -eu; \
+    if [ "$TARGETARCH" = amd64 ]; then export QEMU_GUEST_BASE=0x800000000000; fi; \
+    rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal; \
+    rustup run "$RUST_TOOLCHAIN" rustc --version --verbose; \
+    rustup run "$RUST_TOOLCHAIN" cargo --version; \
+    "$PROTOC" --proto_path="$PROTOC_INCLUDE" \
+       --descriptor_set_out=/tmp/protobuf-well-known.pb \
+       google/protobuf/any.proto google/protobuf/duration.proto \
+       google/protobuf/empty.proto google/protobuf/field_mask.proto \
+       google/protobuf/struct.proto google/protobuf/timestamp.proto
+WORKDIR /src
+COPY . ./
+COPY --from=webbuilder /web/dist web/dist
+ARG SOURCE_REVISION
+ARG VERSION
+ARG BUILD_JOBS=1
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=openobserve-binaries-${TARGETARCH}-${RUST_TOOLCHAIN},target=/src/target,sharing=locked \
+    set -eu; \
+    if [ "$TARGETARCH" = amd64 ]; then export QEMU_GUEST_BASE=0x800000000000; fi; \
+    case "$TARGETARCH" in \
+      amd64) target=x86_64-unknown-linux-gnu ;; \
+      arm64) target=aarch64-unknown-linux-gnu; export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=gcc ;; \
+      *) echo "Unsupported target: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    export RUSTUP_TOOLCHAIN="$RUST_TOOLCHAIN" CARGO_BUILD_JOBS="$BUILD_JOBS"; \
+    export OPENOBSERVE_BUILD_VERSION="$VERSION" OPENOBSERVE_BUILD_COMMIT="$SOURCE_REVISION"; \
+    export OPENOBSERVE_SOURCE_ASSET="assets/openobserve-source-$SOURCE_REVISION-$VERSION.tar.gz"; \
+    test "$(gzip -dc "corresponding-source/openobserve-source-$SOURCE_REVISION-$VERSION.tar.gz" | git get-tar-commit-id)" = "$SOURCE_REVISION"; \
+    cmp "corresponding-source/openobserve-source-$SOURCE_REVISION-$VERSION.tar.gz" "web/dist/$OPENOBSERVE_SOURCE_ASSET"; \
+    cargo build --locked --profile release-prod --target "$target" --bin openobserve; \
+    binary="target/$target/release-prod/openobserve"; \
+    test "$("$binary" --version)" = "openobserve $VERSION"; \
+    mkdir -p /build-output; \
+    install -m 0755 "$binary" /build-output/openobserve; \
+    { \
+      printf 'version=%s\ncommit=%s\nupstream_base=v1.1.2\ntarget=%s\n' "$VERSION" "$SOURCE_REVISION" "$target"; \
+      printf 'rust_toolchain_pin=%s\nrust_toolchain_used=%s\nprofile=release-prod\nfeatures=default-oss\nbuild_method=local-docker\n' "$RUST_TOOLCHAIN_PIN" "$RUST_TOOLCHAIN"; \
+      printf 'qemu_guest_base=%s\n' "${QEMU_GUEST_BASE:-not-set}"; \
+      rustc --version --verbose; cargo --version; "$PROTOC" --version; \
+      file /build-output/openobserve; ldd /build-output/openobserve; \
+    } > /build-output/BUILD-INFO.txt
+
+FROM builder AS packager
+RUN set -eu; \
+    package_name="openobserve-linux-$TARGETARCH-$VERSION"; \
+    package_dir="/packages/$package_name"; \
+    mkdir -p "$package_dir/contrib/aiyou" /artifacts; \
+    cp /build-output/openobserve /build-output/BUILD-INFO.txt "$package_dir/"; \
+    cp LICENSE README.md README.zh-CN.md "$package_dir/"; \
+    cp contrib/aiyou/oidc-integration.md contrib/aiyou/oidc.example.json contrib/aiyou/VERSION "$package_dir/contrib/aiyou/"; \
+    cp "corresponding-source/openobserve-source-$SOURCE_REVISION-$VERSION.tar.gz" "$package_dir/"; \
+    tar -C /packages -czf "/artifacts/$package_name.tar.gz" "$package_name"; \
+    cd /artifacts; sha256sum "$package_name.tar.gz" > "$package_name.tar.gz.sha256"
+
+FROM ubuntu:24.04 AS runtime
+ARG TARGETARCH
+ARG SOURCE_REVISION
+ARG VERSION
+LABEL org.opencontainers.image.source="https://github.com/aiyou178/openobserve" \
+      org.opencontainers.image.revision=$SOURCE_REVISION \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+COPY --from=nodebase /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install --no-install-recommends --yes ca-certificates libssl3t64 libstdc++6 liblzma5 libbz2-1.0 zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /
+COPY --from=builder /build-output/openobserve /openobserve
+COPY --from=builder /build-output/BUILD-INFO.txt /usr/share/openobserve/BUILD-INFO.txt
+COPY LICENSE /usr/share/licenses/openobserve/LICENSE
+COPY README.md README.zh-CN.md /usr/share/doc/openobserve/
+COPY contrib/aiyou/oidc-integration.md contrib/aiyou/oidc.example.json contrib/aiyou/VERSION /usr/share/doc/openobserve/contrib/aiyou/
+COPY corresponding-source/ /usr/share/openobserve/
+RUN set -eu; \
+    if [ "$TARGETARCH" = amd64 ]; then export QEMU_GUEST_BASE=0x800000000000; fi; \
+    test "$(/openobserve --version)" = "openobserve $VERSION"
+EXPOSE 5080 5081
+ENTRYPOINT ["/openobserve"]
+
+FROM scratch AS artifacts
+COPY --from=packager /artifacts/ /

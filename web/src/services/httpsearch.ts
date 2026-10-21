@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import { ossOidc, oidcActive } from "./ossOidc";
+import { attemptTokenRefresh } from "./http";
 import store from "../stores";
 import axios from "axios";
 import { toast } from "@/lib/feedback/Toast/useToast";
@@ -23,6 +25,14 @@ const http = () => {
     // timeout: 10000,
     baseURL: store.state.API_ENDPOINT,
     headers: {},
+  });
+
+  instance.interceptors.request.use((request) => {
+    if (oidcActive()) {
+      request.headers.delete("Authorization");
+      request.headers.set("x-o2-csrf", ossOidc.csrf ?? "");
+    }
+    return request;
   });
 
   instance.interceptors.response.use(
@@ -39,6 +49,10 @@ const http = () => {
             });
             break;
           case 401:
+            if (oidcActive()) {
+              void attemptTokenRefresh(error.config?.url).catch(() => {});
+              return Promise.reject(error);
+            }
             toast({
               message: error.response.data["error"] || gt("common.invalidCredentials"),
               variant: "error",

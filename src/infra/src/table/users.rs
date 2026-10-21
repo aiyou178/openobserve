@@ -285,6 +285,15 @@ pub async fn get(email: &str) -> Result<UserRecord, errors::Error> {
     Ok(UserRecord::from(record))
 }
 
+pub async fn get_oidc_identity(email: &str) -> Result<(String, UserRecord), errors::Error> {
+    let record = Entity::find()
+        .filter(Column::Email.eq(email))
+        .one(get_orm_client_rw().await)
+        .await?
+        .ok_or_else(|| Error::DbError(DbError::SeaORMError("User not found".to_owned())))?;
+    Ok((record.id.clone(), record.into()))
+}
+
 pub async fn get_root_user() -> Result<UserRecord, errors::Error> {
     let client = get_orm_client_ro().await;
     let record = Entity::find()

@@ -2505,7 +2505,8 @@
     "emailRequired": "Email is required",
     "emailInvalid": "Please enter a valid email",
     "passwordRequired": "Password is required",
-    "mustAcceptTerms": "You must accept the terms to continue"
+    "mustAcceptTerms": "You must accept the terms to continue",
+    "source": "Source"
   },
   "user": {
     "subtitle": "People with access to this organization",

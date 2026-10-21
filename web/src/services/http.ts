@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import { ossOidc, oidcActive, oidcLoginPath, logoutOidc } from "./ossOidc";
 import store from "../stores";
 import type { AxiosInstance } from "axios";
 import axios from "axios";
@@ -30,6 +31,16 @@ let refreshPromise: Promise<void> | null = null;
 // Exported so streaming (fetch-based) requests that bypass the axios interceptor
 // can participate in the same token-refresh flow.
 export const attemptTokenRefresh = (requestUrl: string = ""): Promise<void> => {
+  if (oidcActive()) {
+    return logoutOidc()
+      .finally(() => {
+        store.dispatch("logout");
+        useLocalCurrentUser("", true);
+        useLocalUserInfo("", true);
+        window.location.assign(oidcLoginPath());
+      })
+      .then(() => Promise.reject(new Error("Session expired")));
+  }
   // Avoid infinite loops for auth endpoints
   if (
     requestUrl.includes("/config/dex_login") ||
@@ -104,6 +115,14 @@ const http = ({ headers } = {} as any) => {
     headers,
   });
 
+  instance.interceptors.request.use((request) => {
+    if (oidcActive()) {
+      request.headers.delete("Authorization");
+      request.headers.set("x-o2-csrf", ossOidc.csrf ?? "");
+    }
+    return request;
+  });
+
   instance.interceptors.response.use(
     function (response) {
       return response;
@@ -120,6 +139,10 @@ const http = ({ headers } = {} as any) => {
           case 400:
             break;
           case 401:
+            if (oidcActive()) {
+              void attemptTokenRefresh(error.config?.url).catch(() => {});
+              return Promise.reject(error);
+            }
             if (config.isCloud == "true" && !error.request.responseURL.includes("/auth/login")) {
               store.dispatch("logout");
               useLocalCurrentUser("", true);

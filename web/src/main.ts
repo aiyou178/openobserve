@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import { installOidcFetch } from "@/services/ossOidc";
 import { configQuery } from "@/services/config.queries";
 import { createApp } from "vue";
 import { VueQueryPlugin } from "@tanstack/vue-query";
@@ -43,6 +44,7 @@ import { raw } from "@/types/i18n";
 // Apply the resolved theme synchronously before the app mounts so the first
 // paint already uses the correct colors (no flash of the base stylesheet theme).
 bootstrapTheme();
+installOidcFetch();
 
 const activeLocale = getLocale();
 applyDocumentLocale(activeLocale);

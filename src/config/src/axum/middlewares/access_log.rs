@@ -27,12 +27,13 @@ use regex::Regex;
 use tower::{Layer, Service};
 
 /// Request headers whose value is a credential and is never written to the log.
-const REDACTED_REQUEST_HEADERS: [&str; 5] = [
+const REDACTED_REQUEST_HEADERS: [&str; 6] = [
     "authorization",
     "proxy-authorization",
     "cookie",
     "x-api-key",
     "x-o2-mcp",
+    "x-o2-csrf",
 ];
 
 /// Returns the HTTP access log format string based on configuration.
@@ -122,7 +123,13 @@ where
         let path_and_query = req
             .uri()
             .path_and_query()
-            .map(|x| x.as_str())
+            .map(|x| {
+                if req.uri().path().contains("/auth/oidc/") {
+                    req.uri().path()
+                } else {
+                    x.as_str()
+                }
+            })
             .unwrap_or("")
             .to_string();
         let uri_path = req.uri().path().to_string();
@@ -139,6 +146,7 @@ where
         let referer = req
             .headers()
             .get("Referer")
+            .filter(|_| !req.uri().path().contains("/auth/oidc/"))
             .and_then(|v| v.to_str().ok())
             .unwrap_or("-")
             .to_string();
@@ -303,11 +311,17 @@ where
                     let response_header_regex = Regex::new(r"%\{([^}]+)\}o").unwrap();
                     for cap in response_header_regex.captures_iter(&this.format.clone()) {
                         let header_name = &cap[1];
-                        let header_value = response_headers
-                            .iter()
-                            .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
-                            .map(|(_, value)| value.as_str())
-                            .unwrap_or("-");
+                        let header_value = if header_name.eq_ignore_ascii_case("set-cookie")
+                            || header_name.eq_ignore_ascii_case("location")
+                        {
+                            "[REDACTED]"
+                        } else {
+                            response_headers
+                                .iter()
+                                .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
+                                .map(|(_, value)| value.as_str())
+                                .unwrap_or("-")
+                        };
                         log_message =
                             log_message.replace(&format!("%{{{}}}o", header_name), header_value);
                     }

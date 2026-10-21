@@ -333,7 +333,7 @@ export default defineComponent({
     navigateToOpenAPI(zoBackendUrl: string) {
       window.open(zoBackendUrl + "/swagger/index.html", "_blank");
     },
-    signout() {
+    async signout() {
       this.closeSocket();
 
       // AI chat streams outlive their component by design, so navigating away
@@ -354,7 +354,7 @@ export default defineComponent({
       // Always call backend logout to clear auth cookies (auth_tokens, auth_ext)
       // before clearing local state — prevents stale credentials from causing
       // 401 errors on the next login attempt (see #10900)
-      invalidateLoginData();
+      await invalidateLoginData();
 
       this.store.dispatch("logout");
 

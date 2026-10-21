@@ -101,6 +101,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           {{ t("login.login") }}
         </div>
 
+        <OButton
+          v-if="ossOidc.enabled"
+          variant="primary"
+          size="sm-action"
+          block
+          class="mb-3"
+          data-test="oidc-sso-login"
+          @click="loginOidc"
+        >
+          {{ t("login.loginWithSso") }}
+        </OButton>
+        <OButton
+          as="a"
+          :href="sourceUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="ghost"
+          size="sm"
+          block
+        >
+          {{ t("login.source") }}
+        </OButton>
+
         <div v-if="showSSO" class="flex justify-center">
           <OButton
             data-test="sso-login-btn"
@@ -192,6 +215,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 </template>
 
 <script lang="ts">
+import { ossOidc, loginOidc, sourceUrl } from "@/services/ossOidc";
 import { defineComponent, ref, onBeforeMount, onBeforeUnmount, computed } from "vue";
 import { useStore } from "vuex";
 import { useRouter } from "vue-router";
@@ -493,6 +517,9 @@ export default defineComponent({
     };
 
     return {
+      ossOidc,
+      sourceUrl,
+      loginOidc,
       t,
       raw,
       durationFormatter,

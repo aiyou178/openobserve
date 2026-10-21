@@ -1006,6 +1006,7 @@ impl<'de> Deserialize<'de> for FileFormatConfig {
 
 #[derive(Serialize, EnvConfig, Default)]
 pub struct Config {
+    pub oidc: Oidc,
     pub auth: Auth,
     pub http_streaming: HttpStreaming,
     pub report_server: ReportServer,
@@ -1036,6 +1037,15 @@ pub struct Config {
     pub alert_composite: AlertComposite,
     pub db_monitoring: DatabaseMonitoring,
     pub self_profiles: SelfProfiles,
+}
+
+#[derive(Serialize, EnvConfig, Default)]
+pub struct Oidc {
+    #[env_config(name = "ZO_OIDC_ENABLED", default = false)]
+    pub enabled: bool,
+    #[serde(skip_serializing)]
+    #[env_config(name = "ZO_OIDC_CONFIG_FILE", default = "")]
+    pub config_file: String,
 }
 
 /// Background self CPU/memory profile ingest into `_meta.self_profiles`.

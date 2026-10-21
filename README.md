@@ -1,384 +1,192 @@
-<p align="center">
-  <a href="https://openobserve.ai"><img src="https://openobserve.ai/img/logo/o2-logo-readme.svg" alt="OpenObserve"></a>
-</p>
-<p align="center">
-    <em>Open source Datadog alternative for logs, metrics, traces, and frontend monitoring. Modern observability platform: 10x easier, 140x lower storage cost, high performance, petabyte scale.</em>
-</p>
-<p align="center">
-<a href="https://github.com/openobserve/openobserve/releases" target="_blank">
-    <img src="https://img.shields.io/github/v/release/openobserve/openobserve" alt="GitHub Release">
-</a>
-<a href="https://github.com/openobserve/openobserve/blob/main/LICENSE" target="_blank">
-    <img src="https://img.shields.io/github/license/openobserve/openobserve" alt="License">
-</a>
-<a href="https://github.com/openobserve/openobserve/stargazers" target="_blank">
-    <img src="https://img.shields.io/github/stars/openobserve/openobserve" alt="GitHub Stars">
-</a>
-<a href="https://github.com/openobserve/openobserve/graphs/contributors" target="_blank">
-    <img src="https://img.shields.io/github/contributors/openobserve/openobserve" alt="Contributors">
-</a>
-<a href="https://github.com/openobserve/openobserve/issues" target="_blank">
-    <img src="https://img.shields.io/github/issues/openobserve/openobserve" alt="GitHub Issues">
-</a>
-<a href="https://github.com/openobserve/openobserve/commits/main" target="_blank">
-    <img src="https://img.shields.io/github/last-commit/openobserve/openobserve" alt="Last Commit">
-</a>
-</p>
+# OpenObserve OSS with OIDC
 
-<p align="center">
-  <a href="https://cloud.openobserve.ai/">Cloud</a> ·
-  <a href="https://openobserve.ai/docs/">Documentation</a> ·
-  <a href="https://short.openobserve.ai/community">Slack</a> ·
-  <a href="https://openobserve.ai/docs/quickstart/">Quickstart</a>
-</p>
+[English](README.md) | [简体中文](README.zh-CN.md)
 
----
+An independent public fork of [OpenObserve](https://github.com/openobserve/openobserve),
+the observability platform for logs, metrics, traces, and dashboards. Thank you
+to the OpenObserve authors and contributors for developing and open-sourcing
+the original platform. This fork builds on upstream **v1.1.2**
+(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`); its fork release is **v1.1.2.1**.
+It is not an official OpenObserve release or an Enterprise edition.
 
-OpenObserve (O2) is a cloud-native observability platform for logs, metrics, traces, analytics, Real User Monitoring (RUM), and AI/LLM observability. It's a cost-effective alternative to Datadog, Splunk, and Elasticsearch for teams that need full observability without the complexity or cost — with Parquet columnar storage and an S3-native design that cuts storage costs by up to **140x**.
+For the underlying platform, see the [upstream documentation](https://openobserve.ai/docs/)
+and [v1.1.2 source](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882).
 
-## Table of Contents
+## What this fork adds
 
-- [Why OpenObserve?](#why-openobserve)
-- [Quick Start](#quick-start)
-- [Product Tour](#product-tour)
-- [Architecture](#architecture)
-- [Comparisons](#comparisons)
-- [Production Ready](#production-ready)
-- [Security & Compliance](#security--compliance)
-- [Enterprise Edition](#enterprise-edition)
-- [Community & Support](#community--support)
-- [Contributing](#contributing)
-- [FAQ](#faq)
-- [License](#license)
-- [SBOM](#sbom)
+- Browser single sign-on with a generic OpenID Connect provider, disabled by default.
+- Authorization Code flow with PKCE S256, state and nonce; server-side
+  `client_secret_basic` exchange, RS256/JWKS validation, and UserInfo subject checks.
+- Explicit `(issuer, sub)` bindings to existing non-root local users and an
+  organization allowlist; independent, revocable HttpOnly sessions and CSRF protection.
+- Source actions exposing the exact corresponding source in packaged builds.
+- Local Docker packaging for Linux amd64 and arm64 binaries with the UI,
+  license, source archive, build information, and SHA-256 checksums.
 
-## Why OpenObserve?
+Native login and machine Basic/API/OTLP authentication remain separate. SSO does
+**not** add Enterprise RBAC, Viewer/read-only enforcement, or automatic user
+provisioning. Admitted users have this OSS edition's **Admin-level capabilities
+inside allowed organizations**; approve that access before adding a binding.
+Root and service-account identities are not admitted through SSO.
 
-A single platform for all of your observability signals. Here's why teams choose OpenObserve:
+## Enable OIDC
 
-| Benefit | Description |
+1. Run the fork binary and prepare an existing **non-root local user** with Admin
+   membership in each intended existing organization. Record its immutable local
+   `users.id` through your authorized metadata administration interface.
+2. Register a confidential client at your identity provider:
+
+   | Setting | Value |
+   | --- | --- |
+   | Flow | Authorization Code |
+   | PKCE | S256 |
+   | Token endpoint authentication | `client_secret_basic` |
+   | Response mode | `query` |
+   | Scopes | `openid profile` |
+   | Exact callback | `https://observe.example.com/auth/oidc/callback` |
+
+   The provider must publish discovery, RS256 signing keys in JWKS, and UserInfo.
+   Endpoints must share the configured issuer's origin and remain below its path
+   prefix. Other endpoint hosts and HTTP redirects are rejected.
+3. Copy [oidc.example.json](contrib/aiyou/oidc.example.json) to a private read-only
+   server mount, for example `/run/secrets/oidc.json`. Set the issuer, client ID,
+   public URL, and client-secret file path. Store the secret separately in that
+   mounted file, never in the repository or frontend environment.
+4. Add an approved entry to `bindings`:
+
+   ```json
+   {
+     "issuer": "https://idp.example.com/oidc",
+     "subject": "STABLE_OPAQUE_SUBJECT_FROM_YOUR_PROVIDER",
+     "email": "existing-user@example.com",
+     "user_id": "EXISTING_IMMUTABLE_LOCAL_USER_ID",
+     "allow_oss_admin": true,
+     "organizations": ["EXISTING_ORGANIZATION_ID"]
+   }
+   ```
+
+   `email` selects an existing local record; it is **not** matched against a
+   claimed email to establish identity. The immutable local ID and external
+   `(issuer, sub)` must both match. Empty `bindings` denies everyone.
+5. Start OpenObserve with:
+
+   ```bash
+   export ZO_OIDC_ENABLED=true
+   export ZO_OIDC_CONFIG_FILE=/run/secrets/oidc.json
+   ./openobserve
+   ```
+
+   Use HTTPS for issuer and public URL. Neither may have a trailing slash, query,
+   or fragment. For a public path prefix such as
+   `https://observe.example.com/observe`, also set `ZO_BASE_URI=/observe` and
+   register `https://observe.example.com/observe/auth/oidc/callback` exactly.
+6. Open `/web/` under the public URL and use **SSO** on the login page. Use native
+   login for root administration and separate machine credentials for ingestion.
+   Do not redirect OTLP/API ingestion endpoints through interactive SSO.
+
+Configuration and secret mounts must be readable only by the service and
+authorized operators. Never commit real identities, credentials, or logs. See
+the [OIDC operator guide](contrib/aiyou/oidc-integration.md) for session limits,
+proxy redaction, revocation, local-only development, and troubleshooting.
+
+## Build binaries locally
+
+Use [build-binaries.sh](contrib/aiyou/build-binaries.sh) from a clean, committed
+checkout. It builds the UI and `release-prod` OSS Rust binary in local Ubuntu
+24.04 Linux containers, without enabling Enterprise or using GitHub Actions.
+Docker must use a **local** Linux engine; remote Docker contexts are rejected.
+Allocate at least 16 GiB of memory to Docker and keep at least 40 GiB of free
+build storage per architecture. Building amd64 on an ARM host uses Docker's
+Linux emulation and can be substantially slower than a native build.
+The amd64 Rust steps use a process-local QEMU guest-address offset to avoid
+allocator address conflicts under ARM emulation; global Docker settings and
+the compiler target are unchanged.
+
+```bash
+# Default: Linux amd64
+bash contrib/aiyou/build-binaries.sh
+
+# Linux arm64, or both architectures sequentially
+bash contrib/aiyou/build-binaries.sh arm64
+bash contrib/aiyou/build-binaries.sh all
+```
+
+The helper archives the exact committed revision and writes packages to
+`bin/oidc/` by default. It does not push an image or commit, create a release, or
+deploy. Uncommitted or untracked source changes must be reviewed and committed
+before building; never commit secrets to satisfy this check.
+
+| Optional environment variable | Meaning |
 | --- | --- |
-| **140x lower storage cost** | Parquet columnar storage + S3-native architecture dramatically reduce costs vs Elasticsearch |
-| **Single binary deployment** | Up and running in under 2 minutes — no complex cluster setup required |
-| **OpenTelemetry native** | Built on the OpenTelemetry standard — no vendor lock-in |
-| **Unified platform** | Logs, metrics, traces, RUM, dashboards, alerts, and incidents in one tool |
-| **High performance** | Better query performance than Elasticsearch on a quarter of the hardware |
-| **SQL + PromQL** | Query logs and traces with SQL, metrics with SQL or PromQL — no proprietary query language |
-| **Built in Rust** | Memory-safe, high-performance, single binary |
+| `OIDC_BUILD_OUTPUT_DIR` | Package output directory; default `bin/oidc/` under the repository |
+| `OIDC_BUILD_JOBS` | Concurrent Cargo build jobs; default `1` |
+| `OIDC_RUST_TOOLCHAIN` | Explicit dated nightly override, e.g. `nightly-YYYY-MM-DD` |
+| `OIDC_MIN_FREE_GB` | Minimum free-space safety threshold in GiB; default `40` |
 
-**Cost comparison: OpenObserve vs Elasticsearch**
+Do not lower the storage threshold or increase build parallelism without
+checking Docker's available disk and memory. Docker Desktop's VM disk must also
+have sufficient room; host free space alone is not enough.
 
-![OpenObserve vs Elasticsearch storage cost comparison](./screenshots/zo_vs_es.png)
+Expected binary packages:
 
-## Quick Start
-
-### OpenObserve Cloud (fastest way)
-
-Get started in minutes without managing infrastructure. The free tier includes up to 50 GB/day of ingestion.
-
-**[Get Started Free →](https://cloud.openobserve.ai/)**
-
-### 🐳 Docker
-
-```bash
-docker run -d \
-      --name openobserve \
-      -v $PWD/data:/data \
-      -p 5080:5080 \
-      -e ZO_ROOT_USER_EMAIL="root@example.com" \
-      -e ZO_ROOT_USER_PASSWORD="Complexpass#123" \
-      public.ecr.aws/zinclabs/openobserve:latest
+```text
+openobserve-linux-amd64-v1.1.2.1.tar.gz
+openobserve-linux-arm64-v1.1.2.1.tar.gz
 ```
 
-Then open [http://localhost:5080](http://localhost:5080) and log in with the credentials above.
-
-For other installation methods, see the [quickstart documentation](https://openobserve.ai/docs/quickstart). For clustered deployments, see the [High Availability deployment guide](https://openobserve.ai/docs/ha_deployment/).
-
-## Product Tour
-
-OpenObserve ships with a powerful, unified web UI for every signal — logs, traces, metrics, dashboards, RUM, alerts, incidents, pipelines, and AI observability.
-
-[![Watch the OpenObserve introduction video](./screenshots/o2_intro.webp)](https://www.youtube.com/watch?v=4VwuC1tpRP4)
-
-### 🏠 Unified Overview
-
-A single home for your workspace — active incidents, service health (error rate, latency, requests), anomalies, and recent events at a glance.
-
-![OpenObserve home overview](./screenshots/home.png)
-
-### 📊 Logs
-
-Centralized log management with full-text search, SQL queries, quick filters, and a visual query builder. Instantly search across all your logs, build dashboards from log data, and set up alerts — all on Parquet columnar storage for 140x lower storage cost than Elasticsearch. [Read more →](https://openobserve.ai/logs/)
-
-![Logs search with histogram and field explorer](./screenshots/logs.png)
-
-### 🔍 Distributed Tracing
-
-Powered by OpenTelemetry, tracing helps you follow requests across services and pinpoint performance bottlenecks. Explore the full request flow with waterfalls, flame graphs, and Gantt charts; click any span to drill into the trace. [Read more →](https://openobserve.ai/traces/)
-
-![Distributed trace waterfall view](./screenshots/traces.png)
-
-### 🕸️ Service Graph
-
-Visualize service-to-service dependencies and request flow across your system, with per-edge request counts and health-based coloring (healthy, degraded, warning, critical) to spot problem hotspots at a glance.
-
-![Service dependency graph](./screenshots/service-graph.png)
-
-### 📈 Metrics
-
-Explore metrics from your infrastructure and applications, then query them with SQL or PromQL. Browse thousands of metrics with faceted filters, preview them inline, combine multiple queries with formulae, and visualize the results with 19+ chart types. [Read more →](https://openobserve.ai/metrics/)
-
-![Metrics explorer browsing metric time series](./screenshots/metrics.png)
-
-### 📉 Dashboards
-
-Build custom dashboards from any signal with 19+ built-in chart types and 200+ visualization variations, a drag-and-drop panel builder, template variables, and geo maps. [Read more →](https://openobserve.ai/dashboards/)
-
-![Kubernetes namespace dashboard with template variables](./screenshots/dashboards.png)
-
-### 👀 Frontend Monitoring (RUM)
-
-Real User Monitoring with Core Web Vitals, error tracking, performance analytics, and full session replay — so you can see exactly what your users experience. [Read more →](https://openobserve.ai/frontend-monitoring/)
-
-![Session replay with event timeline](./screenshots/session-replay.png)
-
-### 🔔 Alerts
-
-Get notified when something unusual happens on any signal — logs, metrics, or traces. Define thresholds, scheduled or real-time alerts, and notification channels, with alert history and anomaly detection to catch issues early. [Read more →](https://openobserve.ai/alerts/)
-
-![Alerts list with scheduled, real-time, and anomaly alerts](./screenshots/alerts.png)
-
-### 🚨 Incidents
-
-Correlate related alerts into incidents and track them through their lifecycle — open, acknowledged, and resolved — with severity and dimension context for faster response.
-
-![Incident management and tracking](./screenshots/incidents.png)
-
-### 🔀 Pipelines
-
-Enrich, redact, reduce, or normalize data at ingest time with a visual editor. Build stream-processing flows — including logs-to-metrics conversion — from source, transform (VRL functions and conditions), and destination nodes. No external tools required. [Read more →](https://openobserve.ai/pipelines/)
-
-![Visual pipeline editor](./screenshots/pipelines.png)
-
-### 🤖 AI Observability
-
-Monitor your GenAI and LLM applications: track cost, tokens, latency percentiles, and error rates across models, with agent graphs, session traces, and evaluation/quality scoring.
-
-![AI/LLM observability insights](./screenshots/ai-observability.png)
-
-### ✨ O2 AI Assistant
-
-An in-product assistant that writes your SQL, VRL, and PromQL and walks you through logs, traces, metrics, and incidents — turning natural-language questions into queries, dashboards, and alerts.
-
-![O2 AI Assistant](./screenshots/ai-assistant.png)
-
-For the full feature list, see the [documentation](https://openobserve.ai/docs/#project-status-features-and-roadmap).
-
-## Architecture
-
-OpenObserve achieves 140x lower storage costs and high performance through a modern, cloud-native architecture:
-
-- **Parquet columnar storage** — efficient compression and fast analytical queries
-- **S3-native design** — inexpensive object storage with intelligent caching
-- **Built in Rust** — memory-safe, high-performance, single binary
-- **Partitioning, indexing, and smart caching** — reduces search space by up to 99% for most queries
-- **Native multi-tenancy** — organizations and streams as first-class concepts with complete data isolation
-- **Stateless architecture** — rapid scaling and low RPO/RTO for disaster recovery
-
-### Scale & Deployment
-
-- **Thousands of concurrent users** can query a single cluster simultaneously
-- **Single binary** scales to terabytes — unique in the observability space
-- **High Availability mode** scales to petabytes for the most demanding workloads
-- **Multi-region deployments** with cluster federation via Super Cluster architecture *(Enterprise)*
-- **Federated search** across regions and clusters *(Enterprise)*
-
-### High Availability & Disaster Recovery
-
-Deploy in High Availability mode with clustering for mission-critical workloads requiring maximum uptime. OpenObserve's stateless architecture with S3-backed storage enables very low Recovery Point Objective (RPO) and Recovery Time Objective (RTO): stateless nodes restart rapidly, and durability is guaranteed by S3's 99.999999999% (11 nines).
-
-[Read the architecture documentation →](https://openobserve.ai/docs/architecture/) · [Read the enterprise deployment guide →](https://openobserve.ai/docs/ha_deployment/)
-
-## Comparisons
-
-### OpenObserve vs Datadog
-
-| Aspect | OpenObserve | Datadog |
-| --- | --- | --- |
-| Deployment | Self-hosted or Cloud | SaaS only |
-| Pricing model | Per-GB (free up to 50 GB/day) | Per-host + per-GB |
-| Open source | Yes (AGPL-3.0) | No |
-| OpenTelemetry | Native OTLP | Supported |
-| Query language | SQL + PromQL | Proprietary |
-| Vendor lock-in | None | High |
-
-### OpenObserve vs Elasticsearch
-
-| Aspect | OpenObserve | Elasticsearch |
-| --- | --- | --- |
-| Storage cost | **140x lower** | High (hot/warm/cold tiers) |
-| Setup complexity | Single binary | Complex cluster management |
-| Query language | SQL | Lucene/KQL |
-| Hardware requirements | ~1/4 the resources | High memory/CPU |
-
-### OpenObserve vs Splunk
-
-| Aspect | OpenObserve | Splunk |
-| --- | --- | --- |
-| Licensing | Open source | Expensive enterprise licensing |
-| Deployment | Single binary or HA cluster | Complex |
-| Query language | SQL + PromQL | SPL (proprietary) |
-| Cost | Predictable, low | Unpredictable, high |
-
-### OpenObserve vs Grafana/Loki/Prometheus Stack
-
-| Aspect | OpenObserve | Grafana Stack |
-| --- | --- | --- |
-| Components | Single platform | Multiple tools (Grafana + Loki + Prometheus + Tempo) |
-| Management | One binary | Multiple deployments |
-| High cardinality | Full support | Loki struggles with high cardinality |
-| Query performance | Fast on large volumes | Loki slow on large data |
-
-## Production Ready
-
-OpenObserve is battle-tested in production environments worldwide:
-
-- **Thousands of active deployments** across diverse industries
-- **Largest deployment: 2+ PB/day** ingestion
-- **Single binary scales to terabytes** — unique in the observability space
-
-[Read customer stories →](https://openobserve.ai/customer-stories/)
-
-## Security & Compliance
-
-### Security Features
-
-- **Secure by design** with hardened container images
-- **Data encryption** at rest and in transit
-- **Sensitive Data Redaction (SDR)** — automatically redact sensitive data at ingestion and query time *(Enterprise)*
-- **Single Sign-On (SSO)** — OIDC, OAuth, SAML, LDAP/AD integration *(Enterprise)*
-- **Role-Based Access Control (RBAC)** — granular permissions *(Enterprise)* — [Learn more →](https://openobserve.ai/docs/user-guide/identity-and-access-management/role-based-access-control/)
-
-### Compliance Certifications
-
-- ✅ **SOC 2 Type II** certified
-- ✅ **ISO 27001** certified
-- ✅ **GDPR** compliant
-- ✅ **HIPAA** ready (BAA available with Enterprise contracts)
-
-OpenObserve meets the stringent security and compliance requirements of regulated industries including finance, healthcare, and government.
-
-## Enterprise Edition
-
-OpenObserve is a true open source project. **The open source edition is feature-complete and production-ready** — logs, metrics, traces, dashboards, alerts, pipelines, and everything you need to run observability at scale. It will always remain actively maintained and free to use without restrictions.
-
-For organizations that need enterprise-grade features and support, an Enterprise edition adds:
-
-**Enterprise features**
-
-- **Single Sign-On (SSO)** — OIDC, OAuth, SAML 2.0, LDAP/AD, and major identity providers (Okta, Azure Entra, Google, GitHub, GitLab, Keycloak)
-- **Advanced RBAC** — granular role-based access control with custom roles — [Learn more →](https://openobserve.ai/docs/user-guide/identity-and-access-management/role-based-access-control/)
-- **Audit trails** — comprehensive immutable audit logs with configurable retention
-- **Federated search** — query across multiple clusters and regions with Super Cluster
-- **Sensitive Data Redaction (SDR)** — automatically redact PII at ingestion and query time
-- **Advanced encryption** — AES-256 SIV cipher keys with Google Tink KeySet and Akeyless integration
-- **Query & workload management (QoS)** — control query resource usage and priorities in multi-tenant environments
-
-**Support & SLAs**
-
-- Dedicated support with contractual SLA guarantees and priority response times
-- Technical account management, architecture review, and deployment assistance
-- Migration support from existing tools, plus training and onboarding
-
-**Pricing**
-
-- **Free tier**: up to 50 GB/day of ingestion (~1.5 TB/month), including full commercial use *(registration required at 50 GB/day)*
-- Volume discounts and multi-year contracts available
-- [View the complete feature comparison →](https://openobserve.ai/downloads/)
-
-For enterprise inquiries and custom deployments, [contact our sales team](https://openobserve.ai/contactus/).
-
-## Community & Support
-
-The best way to get help, share ideas, and connect with other OpenObserve users is through our community channels.
-
-### 🔗 Join us on Slack
-
-[![Join OpenObserve on Slack](./screenshots/slack.png)](https://short.openobserve.ai/community)
-
-Our Slack community is the most active place for installation and configuration help, sharing best practices, discussing the roadmap, and connecting with the core team.
-
-**[Join the conversation →](https://short.openobserve.ai/community)**
-
-### 📱 Join the OpenObserve community on WeChat
-
-<img src="./screenshots/wechat_qr.jpg" width="300" alt="OpenObserve WeChat QR code">
-
-### Other ways to connect
-
-- 💬 [GitHub Discussions](https://github.com/openobserve/openobserve/discussions) — longer-form discussions and Q&A
-- 🐛 [GitHub Issues](https://github.com/openobserve/openobserve/issues) — report bugs or request features
-- 📖 [Documentation](https://openobserve.ai/docs) — guides, tutorials, and API references
-
-## Contributing
-
-We welcome contributions from the community! Whether you're fixing bugs, adding features, improving documentation, or sharing feedback, your help makes OpenObserve better for everyone.
-
-To get started, read our [Contributing Guide](CONTRIBUTING.md), which covers setting up your development environment, code standards, submitting pull requests, and reporting issues.
-
-## FAQ
-
-### How does OpenObserve achieve 140x lower storage costs?
-
-Through a combination of Parquet columnar storage (efficient compression) and an S3-native architecture (inexpensive object storage). See the cost comparison chart in the [Why OpenObserve?](#why-openobserve) section.
-
-### What are the limitations?
-
-All data in OpenObserve is **immutable** — once ingested, it cannot be modified or deleted (only entire retention periods can be dropped). This is by design and is a feature for logs and compliance use cases, ensuring data integrity and audit trails.
-
-### Is this production-ready?
-
-Yes. OpenObserve runs in production across thousands of deployments worldwide, including environments processing in excess of 2 PB/day. See our [customer stories](https://openobserve.ai/customer-stories/) for real-world examples.
-
-### How does query performance compare to Elasticsearch?
-
-OpenObserve delivers better performance than Elasticsearch for most workloads, with faster search and significantly faster analytics — while using about a quarter of the hardware. The columnar Parquet format is particularly effective for complex aggregations and analytics.
-
-### Is there a steep learning curve?
-
-No. OpenObserve is designed to be intuitive from day one:
-
-- **Familiar query languages** — SQL for logs and traces, PromQL for metrics; no proprietary query language to learn
-- **Easy-to-use GUI** — an intuitive interface with a drag-and-drop dashboard builder
-- **No complex tuning** — unlike Elasticsearch, there are no shards, replicas, or heap sizes to manage. Just install and go.
-
-Most users are productive within hours, not weeks.
-
-## License
-
-**Open Source Edition** — licensed under [AGPL-3.0](https://github.com/openobserve/openobserve/blob/main/LICENSE). We chose AGPL to ensure that improvements to OpenObserve remain open source and benefit the entire community, while still allowing free commercial use. [Why AGPL, and why it's good for the community →](https://openobserve.ai/blog/what-are-apache-gpl-and-agpl-licenses-and-why-openobserve-moved-from-apache-to-agpl/)
-
-**Enterprise Edition** — licensed under a commercial Enterprise License Agreement (not AGPL), which provides additional flexibility for enterprise deployments.
-
-## SBOM
-
-Software Bill of Materials for OpenObserve. You can analyze either SBOM with [Dependency-Track](https://dependencytrack.org/).
-
-### Rust
-
-The SBOM is available [here](./openobserve.cdx.xml). To regenerate it:
+Each has a `.sha256` file. Packages contain `openobserve`, `LICENSE`, both READMEs,
+the OIDC guide and example under `contrib/aiyou/`, `BUILD-INFO.txt`, and the exact source archive. The binary
+embeds the UI and its Source download. Check the checksum before extraction;
+review `BUILD-INFO.txt` for revision, toolchain, and dynamic-library requirements.
+These are **Linux GNU binaries**, not static musl, macOS, or Windows packages.
+Packaging success is not deployment or OIDC acceptance evidence.
+
+The helper uses the repository's dated Rust nightly pin. If its official
+distribution is unavailable, it fails rather than silently changing toolchains.
+An explicitly selected dated nightly override is recorded in the build information
+and still requires compatibility validation.
+
+For a local Linux runtime image from a clean committed snapshot:
 
 ```bash
-cargo install cargo-cyclonedx
-cargo-cyclonedx cyclonedx
+bash contrib/aiyou/build-oidc-image.sh
+# Or explicitly select one architecture:
+bash contrib/aiyou/build-oidc-image.sh amd64
 ```
 
-### JavaScript
+The helper defaults to the local engine's native architecture and uses the same
+`release-prod` builder, pinned toolchain, single-job default, UI, license, and
+exact source archive as binary packaging. It requires Docker Desktop's local
+`desktop-linux` Unix socket. A read-only cache probe selects a 16 GiB starting
+floor only for a native build with an existing release binary and dependency
+cache for the same architecture and toolchain. Native builds without confirmed
+target output use 20 GiB; emulated builds retain 40 GiB. The cached-build allowance budgets 6 GiB for rebuilt compiler output,
+4 GiB for frontend/toolchain layers, 1 GiB for export/context, and a 5 GiB reserve.
+Native builds without target output add 4 GiB for dependency compilation.
+These are headroom policies, not measured minimum requirements. Host and
+Docker free space are checked; the build is cancelled if either falls below a
+5 GiB reserve. No caches are deleted, and existing output tags are rejected.
+`OIDC_MIN_FREE_GB` may raise the detected floor, not lower it. The local image is tagged
+`openobserve-oidc:<full-revision>-<architecture>`. It verifies the image's platform,
+revision, version, and actual `--version` output without starting the server or
+using the network. It does not publish or deploy. See the
+[operator guide](contrib/aiyou/oidc-integration.md#source-and-local-container-build).
+The upstream Cargo package version is retained; the fork release version comes
+from `contrib/aiyou/VERSION`.
 
-The SBOM is available [here](./web/sbom.json). To regenerate it:
+## License and attribution
 
-```bash
-npm install --global @cyclonedx/cyclonedx-npm
-cd web
-cyclonedx-npm > sbom.json
-```
+This public OSS fork uses the [GNU Affero General Public License, version 3 or
+later](LICENSE), retaining upstream copyright and license notices. The OIDC
+integration is independently implemented in public OSS code; no private
+Enterprise modules are enabled or included.
+
+When distributing a modified build or serving it over a network, preserve the
+notices and give users a prominent way to obtain its exact corresponding source
+and build instructions. Supplied packaging embeds the source and exposes it on
+the login page and authenticated Help menu. A moving branch link is not a
+replacement for a distributed binary's corresponding source.
+
+OpenObserve names and marks belong to their respective owners; this fork does
+not imply their endorsement. Contributions to the original platform should
+follow the [upstream contribution guide](CONTRIBUTING.md).

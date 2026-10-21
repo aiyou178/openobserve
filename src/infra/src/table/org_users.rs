@@ -481,6 +481,34 @@ pub async fn list_orgs_by_user(email: &str) -> Result<Vec<UserOrgExpandedRecord>
     Ok(records)
 }
 
+pub async fn list_oidc_orgs_by_user(
+    email: &str,
+) -> Result<Vec<UserOrgExpandedRecord>, errors::Error> {
+    let client = get_orm_client_rw().await;
+    let records = Entity::find()
+        .filter(
+            Expr::expr(Func::lower(Expr::col((Entity, Column::Email)))).eq(email.to_lowercase()),
+        )
+        .order_by(Column::CreatedAt, Order::Desc)
+        .inner_join(super::entity::organizations::Entity)
+        .select_only()
+        .column(Column::Email)
+        .column(Column::OrgId)
+        .column(Column::Role)
+        .column(Column::Token)
+        .column(Column::RumToken)
+        .column(Column::CreatedAt)
+        .column(organizations::Column::OrgName)
+        .column(organizations::Column::OrgType)
+        .column(Column::AllowStaticToken)
+        .into_model::<UserOrgExpandedRecord>()
+        .all(client)
+        .await
+        .map_err(|e| Error::DbError(DbError::SeaORMError(e.to_string())))?;
+
+    Ok(records)
+}
+
 pub async fn list(limit: Option<i64>) -> Result<Vec<OrgUserRecord>, errors::Error> {
     let client = get_orm_client_ro().await;
     let mut res = Entity::find().order_by(Column::CreatedAt, Order::Desc);

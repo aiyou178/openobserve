@@ -83,7 +83,13 @@ where
         let path = req
             .uri()
             .path_and_query()
-            .map(|x| x.as_str())
+            .map(|x| {
+                if req.uri().path().contains("/auth/oidc/") {
+                    req.uri().path()
+                } else {
+                    x.as_str()
+                }
+            })
             .unwrap_or("")
             .to_string();
 
