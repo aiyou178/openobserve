@@ -292,6 +292,18 @@ provider-specific UI fixtures, not a universal OIDC conformance test. Adapt its
 login/consent fixtures to your own test provider before using it. Never run it
 against production, shared persistent data, or real user credentials.
 
+For an isolated HTTPS loopback fixture, `--tls-spki-sha256` accepts one canonical
+Base64 SHA256 SPKI digest. Use a unique task-owned certificate key: Chromium's
+exception matches that key browser-wide, not a hostname. The option never
+disables general certificate validation and is rejected for HTTP or non-loopback
+RP URLs. Playwright API requests verify TLS independently; supply the fixture's
+public CA certificate through process-only `NODE_EXTRA_CA_CERTS`, not a global
+trust-store change. HTTPS sessions must also have a Secure cookie. Keep the SSO
+page's referrer policy compatible with same-origin form POSTs (for example,
+`same-origin`); `no-referrer` can yield `Origin: null`, which Dispatcher correctly
+rejects. The harness restores its disposable Admin membership in `finally` after
+attempting removal, including when an assertion or response fails.
+
 If SSO is unavailable, check the enabled flag, mount permissions, public URL/base
 path, exact callback, discovery capabilities and endpoint-origin/path policy.
 If login completes at the provider but the RP denies access, check the stable

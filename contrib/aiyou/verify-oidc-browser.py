@@ -1,5 +1,5 @@
 # Copyright 2026 OpenObserve Inc.
-import asyncio,json,base64,argparse,tarfile,io,hashlib,os,signal,subprocess
+import asyncio,json,base64,binascii,argparse,tarfile,io,hashlib,os,signal,subprocess
 import re
 from urllib.parse import urlsplit
 from pathlib import Path
@@ -12,11 +12,21 @@ parser.add_argument('--rp-url',default='http://127.0.0.1:5080')
 parser.add_argument('--recovery-case',choices=['membership','binding','disabled'])
 parser.add_argument('--restart-helper',type=Path)
 parser.add_argument('--source-archive',type=Path)
+parser.add_argument('--tls-spki-sha256',help='One task-unique certificate SPKI SHA256 in canonical Base64; HTTPS loopback only')
 args=parser.parse_args()
 BASE=args.rp_url.rstrip('/')
 parsed=urlsplit(BASE)
 if parsed.hostname not in {'127.0.0.1','localhost','::1'} or parsed.username or parsed.password or parsed.query or parsed.fragment:
  raise SystemExit('Only isolated loopback RP URLs are permitted')
+browser_args=['--disable-background-networking']
+if args.tls_spki_sha256:
+ try:
+  pin=base64.b64decode(args.tls_spki_sha256,validate=True)
+ except (binascii.Error,ValueError):
+  raise SystemExit('TLS SPKI must be one canonical Base64 SHA256 digest')
+ if parsed.scheme!='https' or len(pin)!=32 or base64.b64encode(pin).decode()!=args.tls_spki_sha256:
+  raise SystemExit('TLS SPKI requires HTTPS loopback and one canonical Base64 SHA256 digest')
+ browser_args.append('--ignore-certificate-errors-spki-list='+args.tls_spki_sha256)
 root=args.fixture_dir
 provider=json.loads(args.provider_login.read_text())
 local=json.loads((root/'local-credentials.json').read_text())
@@ -30,7 +40,7 @@ def record(name,value):
  assert value,name
 async def main():
  async with async_playwright() as p:
-  browser=await p.chromium.launch(executable_path=args.browser_executable,headless=True,args=['--disable-background-networking'])
+  browser=await p.chromium.launch(executable_path=args.browser_executable,headless=True,args=browser_args)
   context=await browser.new_context()
   page=await context.new_page()
   await page.goto(BASE+'/web/login',wait_until='domcontentloaded')
@@ -66,13 +76,15 @@ async def main():
   cookies=await context.cookies(BASE)
   session=next(cookie for cookie in cookies if cookie['name']=='o2_oidc_session')
   record('opaque_httponly_lax_session',len(session['value'])==43 and session['httpOnly'] and session['sameSite']=='Lax')
+  if parsed.scheme=='https':
+   record('https_session_cookie_is_secure',session['secure'])
   if args.source_archive:
    response=await context.request.get(source_link)
    archive=await response.body()
    record('source_download_is_exact_archive',response.status==200 and archive[:2]==b'\x1f\x8b' and hashlib.sha256(archive).digest()==hashlib.sha256(args.source_archive.read_bytes()).digest())
    with tarfile.open(fileobj=io.BytesIO(archive),mode='r:gz') as source:
     names=source.getnames()
-    record('source_download_contains_code_license_and_build',all(any(name.endswith(expected) for name in names) for expected in ['Cargo.toml','LICENSE','contrib/aiyou/Dockerfile.oidc']))
+    record('source_download_contains_code_license_and_build',all(any(name.endswith(expected) for name in names) for expected in ['Cargo.toml','LICENSE','contrib/aiyou/Dockerfile.binaries']))
   if args.recovery_case:
    auth='Basic '+base64.b64encode((local['root_email']+':'+local['root_password']).encode()).decode()
    machine=await p.request.new_context(extra_http_headers={'Authorization':auth})
@@ -163,14 +175,19 @@ async def main():
   response=await context.request.get(BASE+'/api/organizations',headers={'Authorization':auth});data=await response.json()
   record('explicit_machine_authorization_has_separate_precedence',response.status==200 and len(data['data'])>1)
   machine=await p.request.new_context(extra_http_headers={'Authorization':auth})
-  response=await machine.post(BASE+'/api/'+allowed+'/oidc_smoke/_json',data=[{'disposable':'oidc-interop'}])
-  record('machine_native_ingestion_remains_usable',response.status==200)
-  response=await machine.delete(BASE+'/api/'+allowed+'/users/'+local['user_email'])
-  record('disposable_membership_removal',response.status==200)
-  response=await context.request.get(BASE+'/api/organizations')
-  record('current_membership_rechecked_on_next_request',response.status==401)
-  response=await machine.post(BASE+'/api/'+allowed+'/users/'+local['user_email'],data={'role':'admin'})
-  record('disposable_membership_restored',response.status==200)
+  try:
+   response=await machine.post(BASE+'/api/'+allowed+'/oidc_smoke/_json',data=[{'disposable':'oidc-interop'}])
+   record('machine_native_ingestion_remains_usable',response.status==200)
+   try:
+    response=await machine.delete(BASE+'/api/'+allowed+'/users/'+local['user_email'])
+    record('disposable_membership_removal',response.status==200)
+    response=await context.request.get(BASE+'/api/organizations')
+    record('current_membership_rechecked_on_next_request',response.status==401)
+   finally:
+    response=await machine.post(BASE+'/api/'+allowed+'/users/'+local['user_email'],data={'role':'admin'})
+    record('disposable_membership_restored',response.status==200)
+  finally:
+   await machine.dispose()
   await page.locator('[data-test="header-my-account-profile-icon"]').click()
   await page.locator('[data-test="menu-link-logout-item"]').click()
   await page.locator('[data-test="oidc-sso-login"]').wait_for(timeout=30000)
@@ -181,7 +198,7 @@ async def main():
   response=await replay.get(BASE+'/api/'+allowed+'/streams',headers={'Cookie':'o2_oidc_session='+session['value']})
   await replay.dispose()
   record('revoked_cookie_replay_denied',response.status==401)
-  await machine.dispose();await browser.close()
+  await browser.close()
  (root/'interop-receipts.json').write_text(json.dumps(receipts,indent=2))
 try:asyncio.run(main())
 except Exception as error:
