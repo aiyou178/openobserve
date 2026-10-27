@@ -34,14 +34,10 @@ supported by this configuration model.
 ## Login UI ownership
 
 The RP frontend is this repository's `web/` application. Both local packaging
-helpers build it and embed `web/dist/` in the binary. The Provider's authentication
-and consent pages are separate: when using Dispatcher, build `apps/sso/` and its
-workspace dependencies in `dispatcher_admin` and publish that artifact through its
-own release process. A staging gateway's `sso-dist/` mount serves those Provider
-pages; it is not an OpenObserve asset or an input to this fork's image build.
-Keep its public runtime configuration aligned with the Provider origin and path.
-Do not copy a staging bundle, credentials, or environment-specific runtime config
-into this public fork. A generic OIDC Provider supplies its own authentication UI.
+helpers build it and embed `web/dist/` in the binary. Authentication and consent
+pages belong to the identity provider and are built and published independently.
+The RP redirects to the configured provider and does not bundle a provider-specific
+sign-in application or environment-specific runtime configuration.
 
 ## Server configuration
 
