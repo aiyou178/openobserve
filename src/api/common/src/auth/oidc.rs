@@ -216,7 +216,6 @@ struct Discovery {
     token_endpoint_auth_methods_supported: Vec<String>,
     id_token_signing_alg_values_supported: Vec<String>,
     response_modes_supported: Vec<String>,
-    scopes_supported: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -379,19 +378,7 @@ pub async fn begin(
         ("response_type", "code"),
         ("response_mode", "query"),
         ("redirect_uri", transaction.redirect_uri.as_str()),
-        (
-            "scope",
-            if settings.auto_provision.is_some()
-                && discovery
-                    .scopes_supported
-                    .as_ref()
-                    .is_some_and(|scopes| scopes.iter().any(|scope| scope == "email"))
-            {
-                "openid profile email"
-            } else {
-                "openid profile"
-            },
-        ),
+        ("scope", "openid profile"),
         ("state", state.as_str()),
         ("nonce", transaction.nonce.as_str()),
         ("code_challenge", digest(&transaction.verifier).as_str()),

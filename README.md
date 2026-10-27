@@ -8,11 +8,11 @@ Thank you to the upstream authors and contributors for building and sharing Open
 This fork adds **generic OpenID Connect (OIDC) single sign-on** to the OSS edition.
 It is not an official OpenObserve release and does not enable private Enterprise code.
 
-**Fork version:** [`v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/v1.1.2.2)
+**Fork version:** [`v1.1.2.3`](https://github.com/aiyou178/openobserve/tree/v1.1.2.3)
 
 **Upstream baseline:** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
 
-**Release branch:** [`codex/oidc-v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.2)
+**Release branch:** [`codex/oidc-v1.1.2.3`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.3)
 
 For the underlying platform, see the [OpenObserve documentation](https://openobserve.ai/docs/).
 
@@ -36,7 +36,7 @@ approve that access before enabling automatic provisioning or adding a binding. 
 ## Enable OIDC
 
 1. Register a confidential client with your identity provider using Code flow,
-   PKCE S256, `client_secret_basic`, query response mode, and `openid profile` (plus `email` if supported).
+   PKCE S256, `client_secret_basic`, query response mode, and `openid profile`.
    Register the exact callback, for example `https://observe.example.com/auth/oidc/callback`.
 2. Create the organizations that new OIDC users should join. Set their exact IDs in
    `auto_provision.default_organizations`; new accounts receive this OSS edition's Admin role.
