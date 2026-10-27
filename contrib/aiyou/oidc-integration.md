@@ -2,7 +2,7 @@
 
 This public fork adds an independently implemented OpenID Connect relying party
 to OpenObserve OSS. It is based on upstream v1.1.2
-(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.1.
+(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.2.
 It does not enable private Enterprise modules or replace the upstream license.
 See [the fork README](../../README.md) and [中文说明](../../README.zh-CN.md).
 
@@ -20,7 +20,9 @@ Configure one trusted issuer and a pre-registered confidential client:
 - A discoverable JWKS endpoint and Bearer UserInfo endpoint. UserInfo `sub` must
   match the ID Token; email and groups are not used to grant access.
 
-The RP requests `openid profile`. It does not request `offline_access`, retain
+The RP requests `openid profile`, adding `email` for automatic provisioning
+only when discovery advertises that scope. Providers without email claims or
+email scope remain supported. It does not request `offline_access`, retain
 provider tokens in sessions, refresh tokens, or implement provider-wide logout.
 An email claim or `email_verified=true` is not required for admission.
 
@@ -49,8 +51,11 @@ export ZO_OIDC_CONFIG_FILE=/run/secrets/oidc.json
 ```
 
 Copy [oidc.example.json](oidc.example.json) to that private server path and replace
-the placeholders. The example starts with no bindings and therefore admits no
-identities. The JSON and separate client-secret file must never be included in
+the placeholders. The example enables automatic provisioning into the existing
+`default` organization with explicit OSS Admin approval. Change the organization
+IDs before enabling SSO. Omitting `auto_provision` disables automatic creation;
+only optional explicit `bindings` can then admit identities. The JSON and
+separate client-secret file must never be included in
 web assets, source archives, images, logs, or the repository. Use private
 secret-manager mounts, restrictive permissions such as 0600, and atomic
 replacement. The server rereads configuration and the secret rather than
@@ -65,7 +70,10 @@ embedding them in the frontend.
 | `allow_insecure_loopback` | Default `false`; only for disposable loopback HTTP development |
 | `idle_seconds` | Default 1800; accepted range 60–3600 |
 | `absolute_seconds` | Default 28800; accepted range 60–28800; must be at least `idle_seconds` |
-| `bindings` | Explicit approved external-to-local bindings; maximum 1000 |
+| `auto_provision` | Optional first-login provisioning policy; omit to disable it |
+| `auto_provision.default_organizations` | 1–100 distinct existing active organization IDs; never `_meta` |
+| `auto_provision.allow_oss_admin` | Must be `true` to approve organization Admin capabilities |
+| `bindings` | Optional explicit external-to-local bindings; maximum 1000; take precedence for listed subjects |
 
 HTTPS is required for issuer and public URL except the explicitly enabled
 loopback development case below. Neither URL may contain credentials, a query,
@@ -90,7 +98,51 @@ prefix matching, or a frontend-only callback. Preserve the external scheme,
 host, and path when configuring your reverse proxy. The configured URL, not
 untrusted request headers, determines the redirect URI and trusted Origin.
 
-## Bind an existing identity
+## Automatic first-login provisioning
+
+Configure one policy for all identities authenticated by the trusted issuer:
+
+```json
+"auto_provision": {
+  "default_organizations": ["default"],
+  "allow_oss_admin": true
+}
+```
+
+No per-user bindings are required. After successful ID Token and matching UserInfo
+validation, the server atomically creates an external non-root user, Admin
+memberships in the configured existing active organizations, and an immutable
+`(issuer, sub)` to `users.id` mapping. A missing, inactive, deleted, or reserved
+organization rolls the whole creation back. This OSS edition does not implement
+read-only or Enterprise RBAC roles; enabling this policy admits every authenticated
+subject from the configured client at the documented Admin privilege level.
+
+Only a syntactically valid UserInfo email with `email_verified=true` initializes
+the local email; otherwise a stable identifier under `@oidc.invalid` is generated
+from the issuer and subject. Optional profile names initialize display fields.
+An existing email is never linked or overwritten, even if verified; an email
+collision denies creation. Use the explicit binding mode only when intentionally
+linking an existing account. Provider groups never grant roles.
+
+The persistent mapping, not email, resolves subsequent logins, including after a
+provider email change or server restart. Concurrent logins create one account.
+Default memberships are assigned only at creation: changing defaults affects
+future users, and logging in never restores a removed membership. Local Admin
+memberships, including organizations subsequently granted by an administrator,
+are rechecked on each request; inactive/deleted organizations and `_meta` are
+excluded. Removing all memberships denies access. Deleting a local account leaves
+the mapping as a tombstone, so neither login nor a replacement account with the
+same email can resurrect its access. Removing `auto_provision` denies all sessions
+created in that mode; existing configured bindings remain independent.
+
+Provisioned accounts have no usable native password and no enabled static machine
+token or RUM credential. User and membership caches are refreshed after login.
+The `oidc_identities` table is initialized in the primary metadata database on
+first use, like the existing OIDC transaction/session table. Preserve both tables
+and ordinary user/organization metadata in backups; database write credentials
+need the same table-creation permissions required by the existing OIDC store.
+
+## Optional binding to an existing identity
 
 Create the local user and organization memberships through the normal authorized
 OpenObserve administration workflow before adding a binding. Obtain the user's
@@ -121,12 +173,15 @@ This OSS edition has Admin semantics, including write and user-management
 capabilities inside admitted organizations. It does not enforce Enterprise
 Viewer/read-only, stream-level ACLs, or Enterprise RBAC. Only current local Admin
 memberships are admitted; Root users and Viewer/Editor/User/service-account
-memberships are denied. Claimed groups do not grant roles. No account,
-organization, administrator, or root access is automatically created.
+memberships are denied. Claimed groups do not grant roles. Explicit bindings
+do not create accounts or memberships. Automatic provisioning
+creates users only under the separate policy above; neither mode creates
+organizations or Root accounts.
 
-Each SSO request reads current user and organization membership from the primary
-metadata writer and intersects memberships with the current binding's
-organization allowlist. The organization-list API is filtered on the server;
+Each SSO request reads current user and active organization membership from the
+primary metadata writer. In explicit-binding mode it also intersects memberships
+with the current binding's organization allowlist. The organization-list API
+is filtered on the server;
 root/global organization management APIs are denied. Changes apply at the next
 request's authorization decision; already running requests may finish. This is
 not a guarantee of immediate cross-system revocation.
@@ -287,7 +342,9 @@ Never enable insecure loopback settings for a public deployment. Check root
 `.env` before starting the server because it overrides process environment.
 
 Before a deployment, verify a complete login/logout using your actual provider,
-then verify denial of an unmapped identity, wrong issuer/audience/signature/nonce,
+then verify first-login provisioning, concurrent/restarted login, email changes
+and collisions, default organization rollback, and denial of an unmapped identity
+when automatic provisioning is disabled, wrong issuer/audience/signature/nonce,
 replayed callback, expired session, missing CSRF, denied organization, Root
 identity, removed membership, and removed binding. Confirm server-side
 organization-list filtering, recovery logout after disablement, parallel-tab
@@ -303,8 +360,9 @@ against production, shared persistent data, or real user credentials.
 If SSO is unavailable, check the enabled flag, mount permissions, public URL/base
 path, exact callback, discovery capabilities and endpoint-origin/path policy.
 If login completes at the provider but the RP denies access, check the stable
-subject, immutable local user ID, current Admin membership, allowlist and
-`allow_oss_admin` approval. Inspect only redacted errors; do not dump token
+subject, current Admin membership, provisioning policy and `allow_oss_admin`
+approval. For explicit bindings, also check immutable local user ID and allowlist.
+Inspect only redacted errors; do not dump token
 bodies, callback queries, cookies, configuration secrets, or wire traces.
 
 These instructions describe implemented behavior, not a claim that a particular
