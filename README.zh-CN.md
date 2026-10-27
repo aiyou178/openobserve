@@ -7,11 +7,11 @@
 本 fork 为 OSS 版本增加**通用 OpenID Connect（OIDC）单点登录支持**，
 不是 OpenObserve 官方发行版，也不启用私有 Enterprise 代码。
 
-**本 fork 版本：** [`v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/v1.1.2.1)
+**本 fork 版本：** [`v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/v1.1.2.2)
 
 **上游基线：** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
 
-**独立发布分支：** [`codex/oidc-v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.1)
+**独立发布分支：** [`codex/oidc-v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.2)
 
 平台本身的使用方法请参考 [OpenObserve 上游文档](https://openobserve.ai/docs/)。
 
@@ -20,27 +20,29 @@
 - 可选的标准 OIDC 浏览器 SSO，默认关闭。
 - Authorization Code 流程，使用 PKCE S256、state、nonce、`client_secret_basic`，
   校验 RS256/JWKS，并核对 ID Token 与 UserInfo 的 subject 一致。
-- 显式将 `(issuer, sub)` 绑定到已有非 Root 本地用户和获准组织。
+- 首次登录自动创建用户，以持久化的 `(issuer, sub)` 识别账号，由配置指定默认加入的组织。
+- 兼容通过显式绑定关联已有非 Root 本地用户。
 - 独立、可撤销的 HttpOnly 会话、CSRF 防护和当前组织成员关系检查。
 - OpenObserve 前端中的 SSO 登录、会话初始化、退出、过期处理和 Source 下载入口。
 - 本地 Linux amd64/arm64 打包，包含内嵌前端、准确对应源码、许可证、构建信息及 SHA-256 校验值。
 
-原生登录、机器 Basic/API/OTLP 凭据保持独立。SSO 不会自动创建用户或组织，
+原生登录、机器 Basic/API/OTLP 凭据保持独立。SSO 不会自动创建组织，
 不会按邮箱合并账号，也不增加 Enterprise RBAC。
-获准用户在允许的组织内具有本 OSS 版本的 **Admin 级能力**，请在添加绑定前明确批准。
+获准用户在允许的组织内具有本 OSS 版本的 **Admin 级能力**，请在启用自动建号或添加绑定前明确批准。
 Root 和服务账号不能使用 SSO 登录。
 
 ## 启用 OIDC
 
 1. 在身份提供方注册 confidential client，使用 Code 流程、PKCE S256、
-   `client_secret_basic`、query response mode 和 `openid profile`。
+   `client_secret_basic`、query response mode 和 `openid profile`，可用时再启用 `email` scope。
    精确注册回调地址，例如 `https://observe.example.com/auth/oidc/callback`。
-2. 准备一个已有的非 Root 本地用户，确保其在获准组织中具有 Admin 成员身份，
-   并通过经授权的接口取得不可变的本地 `users.id`。
+2. 预先创建新用户应加入的组织，将准确的组织 ID 填入
+   `auto_provision.default_organizations`；新用户在这些组织中具有 OSS Admin 权限。
 3. 将 [oidc.example.json](contrib/aiyou/oidc.example.json) 复制到服务端私有文件，
    例如 `/run/secrets/oidc.json`。填写 issuer、client ID、公开地址、独立的
-   client-secret 文件路径，以及明确的身份与组织绑定。
-   空绑定拒绝所有人；身份提供方的 email 或 groups 不会自动授予权限。
+   client-secret 文件路径，以及 `auto_provision.default_organizations`。
+   设置 `allow_oss_admin: true` 批准 OSS 权限，无需逐用户维护 bindings。
+   不配置 `auto_provision` 时，继续使用可选的显式绑定模式。
 4. 设置环境变量并启动：
 
    ```bash
@@ -61,6 +63,11 @@ OpenObserve 自己的前端改动均已包含在本仓库的 `web/` 中。
 打包脚本会构建 `web/dist/` 并嵌入二进制，其中包括 SSO 控件和 Source 下载；
 部署时不需要另外挂载 OpenObserve 前端目录。
 身份提供方负责提供自己的认证与授权页面。
+
+首次登录会在同一数据库事务中创建外部用户、默认组织成员关系及身份映射。
+后续按 `(issuer, sub)` 找回同一账号，Provider 邮箱变化不会换号，也不会恢复已移除的成员关系。
+已验证邮箱可用于初始化资料；缺失或未验证邮箱时使用稳定的 `@oidc.invalid` 标识。
+邮箱与已有账号冲突时拒绝建号，不自动合并；不会发放可用的本地密码或机器 token。
 
 在干净、已提交的 checkout 中，使用本地 Docker Linux engine 构建：
 

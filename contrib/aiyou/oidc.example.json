@@ -6,5 +6,8 @@
   "allow_insecure_loopback": false,
   "idle_seconds": 1800,
   "absolute_seconds": 28800,
-  "bindings": []
+  "auto_provision": {
+    "default_organizations": ["default"],
+    "allow_oss_admin": true
+  }
 }

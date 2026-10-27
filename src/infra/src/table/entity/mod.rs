@@ -45,6 +45,7 @@ pub mod llm_prompts;
 pub mod llm_remote_tasks;
 pub mod llm_secrets;
 pub mod model_pricing;
+pub mod oidc_identities;
 pub mod oidc_records;
 pub mod oncall_delivery_reads;
 pub mod oncall_overrides;

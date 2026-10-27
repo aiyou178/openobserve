@@ -47,6 +47,7 @@ pub mod llm_prompts;
 pub mod llm_secrets;
 mod migration;
 pub mod model_pricing;
+pub mod oidc_identities;
 pub mod oidc_records;
 pub mod oncall_deliveries;
 pub mod oncall_overrides;

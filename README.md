@@ -8,11 +8,11 @@ Thank you to the upstream authors and contributors for building and sharing Open
 This fork adds **generic OpenID Connect (OIDC) single sign-on** to the OSS edition.
 It is not an official OpenObserve release and does not enable private Enterprise code.
 
-**Fork version:** [`v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/v1.1.2.1)
+**Fork version:** [`v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/v1.1.2.2)
 
 **Upstream baseline:** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
 
-**Release branch:** [`codex/oidc-v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.1)
+**Release branch:** [`codex/oidc-v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.2)
 
 For the underlying platform, see the [OpenObserve documentation](https://openobserve.ai/docs/).
 
@@ -21,28 +21,30 @@ For the underlying platform, see the [OpenObserve documentation](https://openobs
 - Optional browser SSO with a standards-based OIDC identity provider; disabled by default.
 - Authorization Code flow with PKCE S256, state and nonce, `client_secret_basic`,
   RS256/JWKS validation, and matching ID Token/UserInfo subjects.
-- Explicit `(issuer, sub)` bindings to existing non-root local users and approved organizations.
+- First-login user creation keyed by a durable `(issuer, sub)` identity, with configurable default organizations.
+- Optional explicit bindings for existing non-root local users.
 - Independent, revocable HttpOnly browser sessions, CSRF protection, and current-membership checks.
 - SSO login, session bootstrap, sign-out, expiry handling, and Source download in the OpenObserve UI.
 - Local Linux amd64/arm64 packaging with the embedded UI, exact corresponding source,
   license notices, build information, and SHA-256 checksums.
 
 Native login and machine Basic/API/OTLP credentials remain separate. SSO does not
-automatically create users or organizations, merge accounts by email, or add Enterprise RBAC.
+automatically create organizations, merge accounts by email, or add Enterprise RBAC.
 Admitted users have this OSS edition's **Admin-level capabilities inside allowed organizations**;
-approve that access before adding a binding. Root and service accounts cannot use SSO.
+approve that access before enabling automatic provisioning or adding a binding. Root and service accounts cannot use SSO.
 
 ## Enable OIDC
 
 1. Register a confidential client with your identity provider using Code flow,
-   PKCE S256, `client_secret_basic`, query response mode, and `openid profile`.
+   PKCE S256, `client_secret_basic`, query response mode, and `openid profile` (plus `email` if supported).
    Register the exact callback, for example `https://observe.example.com/auth/oidc/callback`.
-2. Prepare an existing non-root local user with Admin membership in the approved
-   organizations and obtain its immutable local `users.id` through an authorized interface.
+2. Create the organizations that new OIDC users should join. Set their exact IDs in
+   `auto_provision.default_organizations`; new accounts receive this OSS edition's Admin role.
 3. Copy [oidc.example.json](contrib/aiyou/oidc.example.json) to a private server file,
    such as `/run/secrets/oidc.json`. Configure issuer, client ID, public URL,
-   the separate client-secret file, and the explicit identity/organization bindings.
-   Empty bindings deny everyone; provider email and groups do not grant access.
+   the separate client-secret file, and `auto_provision.default_organizations`.
+   Set `allow_oss_admin: true` to approve the OSS privilege level. Per-user bindings
+   are unnecessary. Omitting `auto_provision` retains the optional explicit-binding mode.
 4. Enable the feature and start OpenObserve:
 
    ```bash
@@ -56,7 +58,7 @@ approve that access before adding a binding. Root and service accounts cannot us
 
 Use HTTPS and exact issuer/callback URLs. Keep configuration and credentials out
 of the repository and frontend assets. For path prefixes, session limits, approved
-bindings, proxy privacy, and recovery, see the [OIDC operator guide](contrib/aiyou/oidc-integration.md).
+provisioning, optional bindings, proxy privacy, and recovery, see the [OIDC operator guide](contrib/aiyou/oidc-integration.md).
 
 ## Frontend and build
 
@@ -64,6 +66,13 @@ All OpenObserve frontend changes are included in this repository under `web/`.
 The packaging helpers build `web/dist/` and embed it in the binary, including the
 SSO controls and Source download. There is no separate OpenObserve UI bundle to deploy.
 The identity provider supplies its own authentication and consent pages.
+
+On first login the server atomically creates an external user, its default
+organization memberships, and the persistent identity mapping. Later logins use
+that mapping even if the provider email changes, and never restore removed
+memberships. Verified email may initialize the new profile; absent or unverified
+email uses a stable `@oidc.invalid` identifier. An email collision denies creation
+rather than linking an existing account. No usable password or machine token is issued.
 
 From a clean, committed checkout with a local Docker Linux engine:
 

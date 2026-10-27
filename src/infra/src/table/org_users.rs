@@ -491,6 +491,8 @@ pub async fn list_oidc_orgs_by_user(
         )
         .order_by(Column::CreatedAt, Order::Desc)
         .inner_join(super::entity::organizations::Entity)
+        .filter(organizations::Column::Status.eq("active"))
+        .filter(organizations::Column::DeletedAt.is_null())
         .select_only()
         .column(Column::Email)
         .column(Column::OrgId)

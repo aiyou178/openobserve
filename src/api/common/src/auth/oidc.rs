@@ -17,7 +17,7 @@ use std::{collections::HashSet, time::Duration};
 
 use axum::http::{HeaderMap, Method, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use infra::table::{entity::oidc_records::Model, oidc_records as store};
+use infra::table::{entity::oidc_records::Model, oidc_identities, oidc_records as store};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use rand::RngExt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -44,7 +44,10 @@ pub struct Settings {
     pub idle_seconds: i64,
     #[serde(default = "default_absolute")]
     pub absolute_seconds: i64,
+    #[serde(default)]
     pub bindings: Vec<Binding>,
+    #[serde(default)]
+    pub auto_provision: Option<Provisioning>,
 }
 
 impl Settings {
@@ -90,8 +93,12 @@ impl Settings {
             || !(60..=28800).contains(&self.absolute_seconds)
             || self.idle_seconds > self.absolute_seconds
             || self.bindings.len() > 1000
+            || self.issuer.len() > 2048
         {
             return Err(OidcError);
+        }
+        if let Some(provisioning) = &self.auto_provision {
+            provisioning.validate()?;
         }
         let mut identities = HashSet::new();
         for binding in &self.bindings {
@@ -169,6 +176,35 @@ pub struct Binding {
     pub organizations: Vec<String>,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Provisioning {
+    pub default_organizations: Vec<String>,
+    pub allow_oss_admin: bool,
+}
+
+impl Provisioning {
+    fn validate(&self) -> Result<(), OidcError> {
+        let mut organizations = HashSet::new();
+        if !self.allow_oss_admin
+            || self.default_organizations.is_empty()
+            || self.default_organizations.len() > 100
+            || self.default_organizations.iter().any(|org| {
+                org.is_empty()
+                    || org.len() > 256
+                    || org.trim() != org
+                    || org.contains(['/', '\\'])
+                    || org.chars().any(char::is_control)
+                    || org == config::META_ORG_ID
+                    || !organizations.insert(org)
+            })
+        {
+            return Err(OidcError);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Deserialize)]
 struct Discovery {
     issuer: String,
@@ -180,6 +216,7 @@ struct Discovery {
     token_endpoint_auth_methods_supported: Vec<String>,
     id_token_signing_alg_values_supported: Vec<String>,
     response_modes_supported: Vec<String>,
+    scopes_supported: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -198,6 +235,8 @@ pub struct Session {
     pub issuer: String,
     pub subject: String,
     pub email: String,
+    #[serde(default)]
+    pub user_id: Option<String>,
     pub csrf: String,
 }
 
@@ -229,6 +268,11 @@ struct Claims {
 #[derive(Deserialize)]
 struct UserInfo {
     sub: String,
+    email: Option<String>,
+    email_verified: Option<bool>,
+    given_name: Option<String>,
+    family_name: Option<String>,
+    name: Option<String>,
 }
 
 pub fn now() -> i64 {
@@ -335,7 +379,19 @@ pub async fn begin(
         ("response_type", "code"),
         ("response_mode", "query"),
         ("redirect_uri", transaction.redirect_uri.as_str()),
-        ("scope", "openid profile"),
+        (
+            "scope",
+            if settings.auto_provision.is_some()
+                && discovery
+                    .scopes_supported
+                    .as_ref()
+                    .is_some_and(|scopes| scopes.iter().any(|scope| scope == "email"))
+            {
+                "openid profile email"
+            } else {
+                "openid profile"
+            },
+        ),
         ("state", state.as_str()),
         ("nonce", transaction.nonce.as_str()),
         ("code_challenge", digest(&transaction.verifier).as_str()),
@@ -372,17 +428,14 @@ pub async fn complete(
     {
         return Err(OidcError);
     }
-    let claims = exchange(settings, &transaction, code).await?;
-    let binding = settings
-        .bindings
-        .iter()
-        .find(|b| b.issuer == claims.iss && b.subject == claims.sub)
-        .ok_or(OidcError)?;
+    let (claims, userinfo) = exchange(settings, &transaction, code).await?;
+    let (email, user_id) = login_identity(settings, &claims, &userinfo).await?;
     let session = Session {
         client_id: settings.client_id.clone(),
         issuer: claims.iss,
         subject: claims.sub,
-        email: binding.email.clone(),
+        email,
+        user_id,
         csrf: random(),
     };
     identity(settings, &session).await?;
@@ -415,18 +468,37 @@ pub async fn session(settings: &Settings, headers: &HeaderMap) -> Result<Session
 }
 
 pub async fn identity(settings: &Settings, session: &Session) -> Result<Identity, OidcError> {
-    let binding = binding(settings, session)?;
-    let (id, user) = infra::table::users::get_oidc_identity(&binding.email)
-        .await
-        .map_err(|_| OidcError)?;
-    if id != binding.user_id || !binding.allow_oss_admin || user.is_root {
+    if session.client_id != settings.client_id || session.issuer != settings.issuer {
         return Err(OidcError);
     }
-    let memberships = infra::table::org_users::list_oidc_orgs_by_user(&binding.email)
+    let (user, allowed) = if let Some(user_id) = &session.user_id {
+        settings
+            .auto_provision
+            .as_ref()
+            .ok_or(OidcError)?
+            .validate()?;
+        let (id, user) = oidc_identities::get(&session.issuer, &session.subject)
+            .await
+            .map_err(|_| OidcError)?;
+        if &id != user_id || user.email != session.email {
+            return Err(OidcError);
+        }
+        (user, None)
+    } else {
+        let binding = binding(settings, session)?;
+        let (id, user) = infra::table::users::get_oidc_identity(&binding.email)
+            .await
+            .map_err(|_| OidcError)?;
+        if id != binding.user_id || user.is_root {
+            return Err(OidcError);
+        }
+        (user, Some(binding.organizations.as_slice()))
+    };
+    let memberships = infra::table::org_users::list_oidc_orgs_by_user(&user.email)
         .await
         .map_err(|_| OidcError)?;
     let organizations = organization_intersection(
-        binding,
+        allowed,
         memberships.into_iter().map(|org| (org.org_id, org.role)),
     );
     if organizations.is_empty() {
@@ -500,8 +572,64 @@ pub async fn revoke(headers: &HeaderMap) -> Result<(), OidcError> {
     Ok(())
 }
 
+async fn login_identity(
+    settings: &Settings,
+    claims: &Claims,
+    userinfo: &UserInfo,
+) -> Result<(String, Option<String>), OidcError> {
+    if let Some(binding) = settings
+        .bindings
+        .iter()
+        .find(|binding| binding.issuer == claims.iss && binding.subject == claims.sub)
+    {
+        return Ok((binding.email.clone(), None));
+    }
+    let provisioning = settings.auto_provision.as_ref().ok_or(OidcError)?;
+    provisioning.validate()?;
+    let (user_id, user) = oidc_identities::provision(
+        &claims.iss,
+        &claims.sub,
+        &profile(&claims.iss, userinfo)?,
+        &provisioning.default_organizations,
+    )
+    .await
+    .map_err(|_| OidcError)?;
+    let email = user.email.clone();
+    db::user::refresh_oidc_user(user)
+        .await
+        .map_err(|_| OidcError)?;
+    Ok((email, Some(user_id)))
+}
+
+fn profile(issuer: &str, userinfo: &UserInfo) -> Result<oidc_identities::Profile, OidcError> {
+    let identity = serde_json::to_string(&(issuer, &userinfo.sub)).map_err(|_| OidcError)?;
+    let email = userinfo
+        .email
+        .as_ref()
+        .filter(|email| {
+            userinfo.email_verified == Some(true)
+                && email.len() <= 254
+                && openobserve_core::auth::is_valid_email(email)
+        })
+        .map(|email| email.to_lowercase())
+        .unwrap_or_else(|| format!("oidc-{}@oidc.invalid", digest(&identity)));
+    let name = |value: Option<&str>| {
+        value
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(128)
+            .collect()
+    };
+    Ok(oidc_identities::Profile {
+        email,
+        first_name: name(userinfo.given_name.as_deref().or(userinfo.name.as_deref())),
+        last_name: name(userinfo.family_name.as_deref()),
+    })
+}
+
 fn binding<'a>(settings: &'a Settings, session: &Session) -> Result<&'a Binding, OidcError> {
-    if session.client_id != settings.client_id {
+    if session.client_id != settings.client_id || session.issuer != settings.issuer {
         return Err(OidcError);
     }
     settings
@@ -517,12 +645,14 @@ fn binding<'a>(settings: &'a Settings, session: &Session) -> Result<&'a Binding,
 }
 
 fn organization_intersection(
-    binding: &Binding,
+    allowed: Option<&[String]>,
     memberships: impl Iterator<Item = (String, config::meta::user::UserRole)>,
 ) -> Vec<String> {
     memberships
         .filter(|(org, role)| {
-            binding.organizations.contains(org) && *role == config::meta::user::UserRole::Admin
+            org != config::META_ORG_ID
+                && allowed.is_none_or(|allowed| allowed.contains(org))
+                && *role == config::meta::user::UserRole::Admin
         })
         .map(|(org, _)| org)
         .collect()
@@ -624,7 +754,7 @@ async fn exchange(
     settings: &Settings,
     transaction: &Transaction,
     code: &str,
-) -> Result<Claims, OidcError> {
+) -> Result<(Claims, UserInfo), OidcError> {
     let discovery = discover(settings).await?;
     let secret = tokio::fs::read_to_string(&settings.client_secret_file)
         .await
@@ -663,7 +793,7 @@ async fn exchange(
     if userinfo.sub != claims.sub {
         return Err(OidcError);
     }
-    Ok(claims)
+    Ok((claims, userinfo))
 }
 
 fn verify(
@@ -724,6 +854,7 @@ fn verify(
     if claims.iss != settings.issuer
         || claims.aud != settings.client_id
         || claims.sub.is_empty()
+        || claims.sub.len() > 255
         || claims.nonce != transaction.nonce
         || claims.iat > now() + 60
         || claims.iat < now() - 600
@@ -751,6 +882,7 @@ mod tests {
             idle_seconds: 60,
             absolute_seconds: 300,
             bindings: vec![],
+            auto_provision: None,
         }
     }
 
@@ -797,12 +929,13 @@ mod tests {
             issuer: settings.issuer.clone(),
             subject: "subject-a".into(),
             email: "local@example.invalid".into(),
+            user_id: None,
             csrf: "proof".into(),
         };
         let policy = binding(&settings, &session).unwrap();
         assert_eq!(
             organization_intersection(
-                policy,
+                Some(&policy.organizations),
                 [
                     ("allowed".into(), UserRole::Admin),
                     ("extra".into(), UserRole::Admin)
@@ -812,12 +945,18 @@ mod tests {
             vec!["allowed"]
         );
         assert!(
-            organization_intersection(policy, [("extra".into(), UserRole::Admin)].into_iter())
-                .is_empty()
+            organization_intersection(
+                Some(&policy.organizations),
+                [("extra".into(), UserRole::Admin)].into_iter()
+            )
+            .is_empty()
         );
         assert!(
-            organization_intersection(policy, [("allowed".into(), UserRole::Root)].into_iter())
-                .is_empty()
+            organization_intersection(
+                Some(&policy.organizations),
+                [("allowed".into(), UserRole::Root)].into_iter()
+            )
+            .is_empty()
         );
         session.subject = "unmapped".into();
         assert!(binding(&settings, &session).is_err());
@@ -872,6 +1011,93 @@ mod tests {
         );
         let empty = JwkSet { keys: vec![] };
         assert!(verify(&settings(), &transaction(), &sign(&claims()), &empty).is_err());
+    }
+
+    #[test]
+    fn automatic_provisioning_is_optional_and_requires_approved_default_organizations() {
+        let legacy: Settings = serde_json::from_value(serde_json::json!({
+            "issuer": "https://identity.example/oidc", "client_id": "client",
+            "client_secret_file": "/run/secrets/client", "public_url": "https://observe.example"
+        }))
+        .unwrap();
+        assert!(legacy.auto_provision.is_none());
+        assert!(legacy.bindings.is_empty());
+        let mut policy = Provisioning {
+            default_organizations: vec!["default".into()],
+            allow_oss_admin: true,
+        };
+        assert!(policy.validate().is_ok());
+        policy.allow_oss_admin = false;
+        assert!(policy.validate().is_err());
+        policy.allow_oss_admin = true;
+        for organizations in [
+            vec![],
+            vec!["".into()],
+            vec!["default".into(), "default".into()],
+            vec![config::META_ORG_ID.into()],
+            vec![" default".into()],
+            vec!["org/child".into()],
+        ] {
+            policy.default_organizations = organizations;
+            assert!(policy.validate().is_err());
+        }
+        let unknown = serde_json::json!({"default_organizations": ["default"], "allow_oss_admin": true, "role": "root"});
+        assert!(serde_json::from_value::<Provisioning>(unknown).is_err());
+    }
+
+    #[test]
+    fn provider_profile_never_substitutes_email_for_the_subject() {
+        let mut info: UserInfo = serde_json::from_value(serde_json::json!({
+            "sub": "subject-a", "email": "person@example.com", "email_verified": false,
+            "name": "Example User", "family_name": "Family"
+        }))
+        .unwrap();
+        let anonymous = profile("https://identity.example", &info).unwrap();
+        assert!(openobserve_core::auth::is_valid_email(&anonymous.email));
+        assert!(anonymous.email.ends_with("@oidc.invalid"));
+        assert_eq!(anonymous.first_name, "Example User");
+        info.email = Some("other@example.com".into());
+        assert_eq!(
+            profile("https://identity.example", &info).unwrap().email,
+            anonymous.email
+        );
+        assert_ne!(
+            profile("https://other.example", &info).unwrap().email,
+            anonymous.email
+        );
+        info.sub = "subject-b".into();
+        assert_ne!(
+            profile("https://identity.example", &info).unwrap().email,
+            anonymous.email
+        );
+        info.email_verified = Some(true);
+        info.email = Some("Verified@Example.com".into());
+        assert_eq!(
+            profile("https://identity.example", &info).unwrap().email,
+            "verified@example.com"
+        );
+        info.email = Some("invalid".into());
+        assert!(
+            profile("https://identity.example", &info)
+                .unwrap()
+                .email
+                .ends_with("@oidc.invalid")
+        );
+        assert_eq!(
+            organization_intersection(
+                None,
+                [
+                    ("first".into(), config::meta::user::UserRole::Admin),
+                    ("second".into(), config::meta::user::UserRole::Viewer),
+                    (
+                        config::META_ORG_ID.into(),
+                        config::meta::user::UserRole::Admin
+                    ),
+                ]
+                .into_iter()
+            ),
+            vec!["first"]
+        );
     }
 
     #[test]

@@ -215,6 +215,41 @@ pub async fn add(db_user: &DBUser) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+pub async fn refresh_oidc_user(user: users::UserRecord) -> Result<(), anyhow::Error> {
+    let email = user.email.clone();
+    let memberships = infra::table::org_users::list_oidc_orgs_by_user(&email).await?;
+    USERS.insert(email.to_lowercase(), user);
+    for org in memberships {
+        ORG_USERS.insert(
+            format!("{}/{}", org.org_id, email.to_lowercase()),
+            infra::table::org_users::OrgUserRecord {
+                email: email.clone(),
+                org_id: org.org_id,
+                role: org.role,
+                token: org.token,
+                rum_token: org.rum_token,
+                created_at: org.created_at,
+                allow_static_token: org.allow_static_token,
+            },
+        );
+    }
+    let _ = put_into_db_coordinator(
+        &format!("{USER_RECORD_KEY}{email}"),
+        Bytes::new(),
+        true,
+        None,
+    )
+    .await;
+    let _ = put_into_db_coordinator(
+        &format!("{}many/user/{email}", org_users::ORG_USERS_KEY_PREFIX),
+        Bytes::new(),
+        true,
+        None,
+    )
+    .await;
+    Ok(())
+}
+
 /// Update a user, then refresh the local cache and the rest of the cluster.
 ///
 /// `password_changed` carries through to the row write — see [`users::update`] — and on to the
