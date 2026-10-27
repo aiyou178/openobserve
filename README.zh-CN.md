@@ -27,6 +27,25 @@ Viewer/只读权限控制或自动创建用户。获准的 SSO 用户在允许�
 **Admin 级能力**，请在增加绑定前明确批准该权限。Root 用户和服务账号不能通过此 SSO
 入口登录。
 
+## 前端归属与打包
+
+OpenObserve 自己的前端源码在本仓库的 `web/`：SSO 按钮、回调及会话初始化、退出和
+Source 下载入口均已包含。二进制与镜像构建脚本会构建 `web/dist/`，并将其嵌入
+OpenObserve 二进制；部署该二进制时不需要再挂载一份 OpenObserve 前端目录。
+
+Dispatcher 的中央登录、同意授权页是独立的身份提供方应用，源码属于
+`dispatcher_admin` 的 `apps/sso/` 及其共享 `packages/features/auth-shell/` 等依赖。
+机器上的 `sso-dist/`（包含 `index.html`、`config.json` 和 `assets/`）是这套应用的
+构建产物，并非 OpenObserve 遗漏的前端源码。它应按 Dispatcher 前端的发布流程
+构建、发布，并由 Provider 配置的同源地址和路径提供服务，不复制进这个通用
+OpenObserve RP 或它的对应源码归档。其他 OIDC Provider 使用各自的登录页面。
+
+本 fork 的发布代码位于独立分支
+[`codex/oidc-v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.1)，
+对应 tag 为 [`v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/v1.1.2.1)。
+上游默认分支的实际名称是 `main`；该发布分支保留指定的 v1.1.2 基线，
+不会随默认分支升级。
+
 ## 启用 OIDC
 
 1. 运行本 fork 的二进制，准备一个已有的**非 Root 本地用户**，确保其在目标已有组织中
