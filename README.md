@@ -29,6 +29,27 @@ provisioning. Admitted users have this OSS edition's **Admin-level capabilities
 inside allowed organizations**; approve that access before adding a binding.
 Root and service-account identities are not admitted through SSO.
 
+## Frontend ownership and packaging
+
+This fork includes the OpenObserve UI under `web/`: its SSO action, callback/session
+bootstrap, sign-out, and source download belong to this repository. The local
+binary and image helpers build `web/dist/` and embed it in the OpenObserve binary;
+no separate OpenObserve frontend directory needs to be deployed beside that binary.
+
+Dispatcher's central sign-in and consent pages are a separate identity-provider
+application. Their source belongs to `dispatcher_admin`, in `apps/sso/` and its
+shared `packages/features/auth-shell/` dependencies. A directory named `sso-dist/`
+containing `index.html`, `config.json`, and `assets/` is that application's build
+output, not missing OpenObserve source. Build and publish it through the Dispatcher
+frontend release process and serve it on the Provider's configured origin/path.
+It is not copied into this generic OpenObserve RP or its corresponding-source archive.
+Other OIDC providers supply their own sign-in UI.
+
+The fork release lives on [`codex/oidc-v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.1)
+and tag [`v1.1.2.1`](https://github.com/aiyou178/openobserve/tree/v1.1.2.1).
+The upstream default branch is named `main`; the release stays on its explicit
+v1.1.2 baseline instead of upgrading to the current default branch.
+
 ## Enable OIDC
 
 1. Run the fork binary and prepare an existing **non-root local user** with Admin
