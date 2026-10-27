@@ -7,11 +7,11 @@
 本 fork 为 OSS 版本增加**通用 OpenID Connect（OIDC）单点登录支持**，
 不是 OpenObserve 官方发行版，也不启用私有 Enterprise 代码。
 
-**本 fork 版本：** [`v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/v1.1.2.2)
+**本 fork 版本：** [`v1.1.2.3`](https://github.com/aiyou178/openobserve/tree/v1.1.2.3)
 
 **上游基线：** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
 
-**独立发布分支：** [`codex/oidc-v1.1.2.2`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.2)
+**独立发布分支：** [`codex/oidc-v1.1.2.3`](https://github.com/aiyou178/openobserve/tree/codex/oidc-v1.1.2.3)
 
 平台本身的使用方法请参考 [OpenObserve 上游文档](https://openobserve.ai/docs/)。
 
@@ -34,7 +34,7 @@ Root 和服务账号不能使用 SSO 登录。
 ## 启用 OIDC
 
 1. 在身份提供方注册 confidential client，使用 Code 流程、PKCE S256、
-   `client_secret_basic`、query response mode 和 `openid profile`，可用时再启用 `email` scope。
+   `client_secret_basic`、query response mode 和 `openid profile`。
    精确注册回调地址，例如 `https://observe.example.com/auth/oidc/callback`。
 2. 预先创建新用户应加入的组织，将准确的组织 ID 填入
    `auto_provision.default_organizations`；新用户在这些组织中具有 OSS Admin 权限。

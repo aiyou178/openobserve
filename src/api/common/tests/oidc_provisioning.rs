@@ -23,8 +23,8 @@ use std::{
 
 use axum::{
     Form, Json, Router,
-    extract::State,
-    http::{HeaderMap, header},
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode, header},
     routing::{get, post},
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -57,6 +57,19 @@ async fn discovery(State(provider): State<Provider>) -> Json<Value> {
         document["scopes_supported"] = json!(["openid", "profile", "email"]);
     }
     Json(document)
+}
+
+async fn authorize(Query(query): Query<HashMap<String, String>>) -> StatusCode {
+    let scopes: Vec<_> = query["scope"].split_whitespace().collect();
+    if scopes.contains(&"openid")
+        && scopes
+            .iter()
+            .all(|scope| ["openid", "profile"].contains(scope))
+    {
+        StatusCode::OK
+    } else {
+        StatusCode::BAD_REQUEST
+    }
 }
 
 async fn token(
@@ -105,6 +118,13 @@ async fn start_login(
 ) -> (String, String) {
     let browser = oidc::random();
     let authorize = oidc::begin(settings, &browser, "/web/").await.unwrap();
+    assert!(
+        reqwest::get(&authorize)
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
     let url = url::Url::parse(&authorize).unwrap();
     let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(query["scope"], expected_scope);
@@ -172,6 +192,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
             };
             let router = Router::new()
                 .route("/oidc/.well-known/openid-configuration", get(discovery))
+                .route("/oidc/authorize", get(authorize))
                 .route(
                     "/oidc/jwks",
                     get(|| async {
@@ -224,7 +245,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
             }
 
             provider.email_scope.store(true, Ordering::SeqCst);
-            let (browser, state) = start_login(&settings, &provider, "first-subject", "openid profile email").await;
+            let (browser, state) = start_login(&settings, &provider, "first-subject", "openid profile").await;
             assert!(oidc::complete(&settings, &browser, &state, "fixture-code").await.is_ok());
 
             let provisioning = settings.auto_provision.take();
@@ -238,7 +259,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
             );
             assert_eq!(infra::table::users::list(None).await.unwrap().len(), 1);
             settings.auto_provision = provisioning;
-            let (browser, state) = start_login(&settings, &provider, "unverified-subject", "openid profile email").await;
+            let (browser, state) = start_login(&settings, &provider, "unverified-subject", "openid profile").await;
             provider.login.lock().await["userinfo"] = json!({
                 "sub": "different-subject", "email": "unverified@example.com", "email_verified": true
             });

@@ -693,8 +693,14 @@ pub fn basic_routes() -> Router {
         .route("/healthz", get(status::healthz).head(status::healthz_head))
         .route("/schedulez", get(status::schedulez))
         .route("/metrics", get(get_metrics))
-        .route("/auth/oidc/bootstrap", get(crate::handler::http::oidc::bootstrap))
-        .route("/auth/oidc/logout", post(crate::handler::http::oidc::logout));
+        .route(
+            "/auth/oidc/bootstrap",
+            get(crate::handler::http::oidc::bootstrap),
+        )
+        .route(
+            "/auth/oidc/logout",
+            post(crate::handler::http::oidc::logout),
+        );
 
     #[cfg(feature = "cloud")]
     {
