@@ -2,7 +2,7 @@
 
 This public fork adds an independently implemented OpenID Connect relying party
 to OpenObserve OSS. It is based on upstream v1.1.2
-(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.2.
+(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.3.
 It does not enable private Enterprise modules or replace the upstream license.
 See [the fork README](../../README.md) and [中文说明](../../README.zh-CN.md).
 
@@ -20,9 +20,10 @@ Configure one trusted issuer and a pre-registered confidential client:
 - A discoverable JWKS endpoint and Bearer UserInfo endpoint. UserInfo `sub` must
   match the ID Token; email and groups are not used to grant access.
 
-The RP requests `openid profile`, adding `email` for automatic provisioning
-only when discovery advertises that scope. Providers without email claims or
-email scope remain supported. It does not request `offline_access`, retain
+The RP requests `openid profile` for both explicit bindings and automatic provisioning.
+Discovery lists provider capabilities, not the scopes granted to this client, so
+advertising `email` does not add it to authorization requests. Providers without
+email claims remain supported. The RP does not request `offline_access`, retain
 provider tokens in sessions, refresh tokens, or implement provider-wide logout.
 An email claim or `email_verified=true` is not required for admission.
 
