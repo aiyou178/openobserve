@@ -69,8 +69,8 @@ embedding them in the frontend.
 | `client_secret_file` | Server-only file containing the client secret |
 | `public_url` | Browser-visible OpenObserve origin and optional base path, without a trailing slash |
 | `allow_insecure_loopback` | Default `false`; only for disposable loopback HTTP development |
-| `idle_seconds` | Default 1800; accepted range 60–3600 |
-| `absolute_seconds` | Default 28800; accepted range 60–28800; must be at least `idle_seconds` |
+| `idle_seconds` | Default 1800; accepted range 60–86400 (24 hours) |
+| `absolute_seconds` | Default 28800; accepted range 60–604800 (seven days); must be at least `idle_seconds` |
 | `auto_provision` | Optional first-login provisioning policy; omit to disable it |
 | `auto_provision.default_organizations` | 1–100 distinct existing active organization IDs; never `_meta` |
 | `auto_provision.allow_oss_admin` | Must be `true` to approve organization Admin capabilities |

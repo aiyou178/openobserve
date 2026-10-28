@@ -89,8 +89,8 @@ impl Settings {
             || public.query().is_some()
             || self.client_id.is_empty()
             || self.client_id.len() > 256
-            || !(60..=3600).contains(&self.idle_seconds)
-            || !(60..=28800).contains(&self.absolute_seconds)
+            || !(60..=86_400).contains(&self.idle_seconds)
+            || !(60..=604_800).contains(&self.absolute_seconds)
             || self.idle_seconds > self.absolute_seconds
             || self.bindings.len() > 1000
             || self.issuer.len() > 2048
@@ -897,6 +897,36 @@ mod tests {
             &EncodingKey::from_rsa_pem(include_bytes!("fixtures/oidc-test-only.pem")).unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn session_timeouts_allow_one_idle_day_and_one_absolute_week() {
+        let defaults: Settings = serde_json::from_value(serde_json::json!({
+            "issuer": "https://identity.example/oidc", "client_id": "client",
+            "client_secret_file": "/run/secrets/client", "public_url": "https://observe.example"
+        }))
+        .unwrap();
+        assert_eq!(defaults.idle_seconds, 1800);
+        assert_eq!(defaults.absolute_seconds, 28800);
+        for (idle, absolute, valid) in [
+            (1800, 28800, true),
+            (60, 60, true),
+            (86_400, 604_800, true),
+            (86_401, 604_800, false),
+            (86_400, 604_801, false),
+            (59, 604_800, false),
+            (60, 59, false),
+            (86_400, 86_399, false),
+        ] {
+            let mut settings = settings();
+            settings.idle_seconds = idle;
+            settings.absolute_seconds = absolute;
+            assert_eq!(
+                settings.validate().is_ok(),
+                valid,
+                "idle={idle}, absolute={absolute}"
+            );
+        }
     }
 
     #[test]
