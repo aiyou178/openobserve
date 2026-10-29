@@ -2,7 +2,7 @@
 
 This public fork adds an independently implemented OpenID Connect relying party
 to OpenObserve OSS. It is based on upstream v1.1.2
-(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.3.
+(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.4.
 It does not enable private Enterprise modules or replace the upstream license.
 See [the fork README](../../README.md) and [中文说明](../../README.zh-CN.md).
 
