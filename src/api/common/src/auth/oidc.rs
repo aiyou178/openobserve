@@ -509,7 +509,6 @@ pub async fn authorize(
     let identity = identity(settings, &session).await?;
     let path = path.trim_start_matches('/');
     let path = path.strip_prefix("api/").unwrap_or(path);
-    let path = path.strip_prefix("v2/").unwrap_or(path);
     if common::meta::ingestion_routes::classify(method, path).is_some() {
         return Err(OidcError);
     }
@@ -543,7 +542,7 @@ pub async fn authorize(
     {
         return Err(OidcError);
     }
-    let org = path.split('/').next().ok_or(OidcError)?;
+    let org = openobserve_core::auth::org_from_path(&segments);
     if !identity.organizations.iter().any(|allowed| allowed == org) {
         return Err(OidcError);
     }

@@ -331,12 +331,6 @@ fn license_denial(_required: &[Feature]) -> Option<Response> {
 /// Pair it with `password_policy_middleware` layered inside it on every router that uses it: this
 /// one answers who the caller is, that one whether their password still entitles them to be here.
 pub async fn auth_middleware(request: Request, next: Next) -> Response {
-    if openobserve_api_common::auth::oidc::has_session_cookie(request.headers())
-        && !request.headers().contains_key(header::AUTHORIZATION)
-    {
-        return crate::handler::http::oidc::authenticate(request, next).await;
-    }
-
     // Extract request data FIRST, before any async calls
     // This ensures the future is Send because RequestData is Send + Sync
     let req_data = RequestData {
@@ -351,6 +345,12 @@ pub async fn auth_middleware(request: Request, next: Next) -> Response {
     // The auth layers check one org, so the handler must serve that same org.
     if let Err(error) = validate_routed_org(&mut parts).await {
         return error.into_response();
+    }
+    if openobserve_api_common::auth::oidc::has_session_cookie(&parts.headers)
+        && !parts.headers.contains_key(header::AUTHORIZATION)
+    {
+        return crate::handler::http::oidc::authenticate(Request::from_parts(parts, body), next)
+            .await;
     }
     let auth_info = match AuthExtractor::from_request_parts(&mut parts, &()).await {
         Ok(info) => info,
@@ -3637,6 +3637,17 @@ mod tests {
             let status = app.clone().oneshot(request).await.unwrap().status();
             assert_eq!(status, expected, "{uri}");
         }
+        let authenticated = Router::new()
+            .route("/{org_id}/kv/{key}", get(|| async { "secret" }))
+            .layer(middleware::from_fn(auth_middleware));
+        let request = Request::get("/v2/kv/folders")
+            .header(header::COOKIE, "o2_oidc_session=malformed")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            authenticated.oneshot(request).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
         let nested = Router::new().nest(
             "/api",
             Router::new()

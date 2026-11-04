@@ -84,7 +84,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     mkdir -p /build-output; \
     install -m 0755 "$binary" /build-output/openobserve; \
     { \
-      printf 'version=%s\ncommit=%s\nupstream_base=v1.1.2\ntarget=%s\n' "$VERSION" "$SOURCE_REVISION" "$target"; \
+      printf 'version=%s\ncommit=%s\nupstream_base=08f0d75c68519932da87b784ebbdd6a28cad6fcd\ntarget=%s\n' "$VERSION" "$SOURCE_REVISION" "$target"; \
       printf 'rust_toolchain_pin=%s\nrust_toolchain_used=%s\nprofile=release-prod\nfeatures=default-oss\nbuild_method=local-docker\n' "$RUST_TOOLCHAIN_PIN" "$RUST_TOOLCHAIN"; \
       printf 'qemu_guest_base=%s\n' "${QEMU_GUEST_BASE:-not-set}"; \
       rustc --version --verbose; cargo --version; "$PROTOC" --version; \

@@ -570,8 +570,16 @@ mod tests {
     }
 
     #[test]
-    fn slack_callback_secrets_never_reach_the_access_log() {
+    fn oauth_callback_secrets_never_reach_the_access_log() {
         for (url, masked) in [
+            (
+                "https://o2.test/base/auth/oidc/callback?code=oidc-code&state=oidc-state#secret",
+                "https://o2.test/base/auth/oidc/callback",
+            ),
+            (
+                "/auth/oidc/callback?state=oidc-state&code=oidc-code",
+                "/auth/oidc/callback",
+            ),
             (
                 "https://o2.test/web/slack/oauth/callback?code=c0de-123&state=s7at3",
                 "https://o2.test/web/slack/oauth/callback?code=…&state=…",

@@ -101,10 +101,7 @@ export default function (store: any) {
       if (session.enabled && session.authenticated && session.user) {
         if (to.path === "/logout") {
           await logoutOidc();
-          await store.dispatch("logout");
-          useLocalUserInfo("", true);
-          useLocalCurrentUser("", true);
-          next({ path: "/login" });
+          next();
           return;
         }
         if (store.state.userInfo?.email !== session.user.email) {
