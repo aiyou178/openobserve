@@ -72,7 +72,7 @@ async def main():
    record('source_download_is_exact_archive',response.status==200 and archive[:2]==b'\x1f\x8b' and hashlib.sha256(archive).digest()==hashlib.sha256(args.source_archive.read_bytes()).digest())
    with tarfile.open(fileobj=io.BytesIO(archive),mode='r:gz') as source:
     names=source.getnames()
-    record('source_download_contains_code_license_and_build',all(any(name.endswith(expected) for name in names) for expected in ['Cargo.toml','LICENSE','contrib/aiyou/Dockerfile.oidc']))
+    record('source_download_contains_code_license_and_build',all(any(name.endswith(expected) for name in names) for expected in ['Cargo.toml','LICENSE','contrib/aiyou/Dockerfile.binaries']))
   if args.recovery_case:
    auth='Basic '+base64.b64encode((local['root_email']+':'+local['root_password']).encode()).decode()
    machine=await p.request.new_context(extra_http_headers={'Authorization':auth})

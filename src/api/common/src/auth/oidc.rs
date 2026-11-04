@@ -508,7 +508,6 @@ pub async fn authorize(
     let session = session(settings, headers).await?;
     let identity = identity(settings, &session).await?;
     let path = path.trim_start_matches('/');
-    let path = path.strip_prefix("api/").unwrap_or(path);
     if common::meta::ingestion_routes::classify(method, path).is_some() {
         return Err(OidcError);
     }

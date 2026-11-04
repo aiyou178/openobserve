@@ -358,6 +358,12 @@ provider-specific UI fixtures, not a universal OIDC conformance test. Adapt its
 login/consent fixtures to your own test provider before using it. Never run it
 against production, shared persistent data, or real user credentials.
 
+For `verify-source-cache.py`, pass the old and new local source archives with
+their original `openobserve-source-<revision>-<version>.tar.gz` filenames. The
+verifier derives each immutable asset URL from that package name and checks the
+new Source link against the exact revision/version URL. The browser integration
+harness checks that the source archive includes `contrib/aiyou/Dockerfile.binaries`.
+
 If SSO is unavailable, check the enabled flag, mount permissions, public URL/base
 path, exact callback, discovery capabilities and endpoint-origin/path policy.
 If login completes at the provider but the RP denies access, check the stable

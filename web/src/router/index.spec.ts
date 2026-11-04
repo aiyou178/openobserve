@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createStore } from "vuex";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +39,12 @@ vi.mock("@/composables/shared/router", () => ({
         path: "/ai/public/:token",
         name: "publicSharedChat",
         component: { template: "<div>Public chat</div>" },
+        meta: { public: true },
+      },
+      {
+        path: "/public/dashboards/:slug",
+        name: "publicDashboard",
+        component: { template: "<div>Public dashboard</div>" },
         meta: { public: true },
       },
       {
@@ -94,6 +100,8 @@ vi.mock("@/enterprise/composables/router", () => ({
 
 vi.mock("@/utils/zincutils", () => ({
   getDecodedUserInfo: vi.fn().mockReturnValue(null),
+  useLocalUserInfo: vi.fn(),
+  useLocalCurrentUser: vi.fn(),
   getPath: vi.fn().mockReturnValue("/"),
   mergeRoutes: vi.fn((r1: any[], r2: any[]) => [...(r1 || []), ...(r2 || [])]),
 }));
@@ -119,6 +127,7 @@ vi.mock("@/layouts/MainLayout.vue", () => ({
 import createAppRouter from "@/router/index";
 import { getDecodedUserInfo } from "@/utils/zincutils";
 import { openobserveRum } from "@openobserve/browser-rum";
+import { ossOidc } from "@/services/ossOidc";
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal Vuex store for tests
@@ -129,11 +138,17 @@ function buildStore(loggedIn = false) {
       loggedIn,
     },
     mutations: {
+      logout(state: { loggedIn: boolean }) {
+        state.loggedIn = false;
+      },
       login(state: any, payload: any) {
         state.loggedIn = payload.loginState;
       },
     },
     actions: {
+      logout({ commit }) {
+        commit("logout");
+      },
       login(context: any, payload: any) {
         context.commit("login", payload);
       },
@@ -150,9 +165,53 @@ describe("router/index (factory)", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    Object.assign(ossOidc, { enabled: false, authenticated: false, session_invalid: false });
     store = buildStore(false);
     router = createAppRouter(store);
   });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    sessionStorage.clear();
+    Object.assign(ossOidc, { enabled: false, authenticated: false, session_invalid: false });
+  });
+
+  it.each(["expired", "unavailable"])(
+    "opens public routes with %s SSO state while protecting private routes",
+    async (mode) => {
+      let invalid = true;
+      sessionStorage.setItem("o2-auth-mode", "oidc");
+      store = buildStore(true);
+      router = createAppRouter(store);
+      const requests = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/logout")) {
+          invalid = false;
+          return new Response(null, { status: 204 });
+        }
+        if (mode === "unavailable") return new Response(null, { status: 503 });
+        return new Response(
+          JSON.stringify({
+            enabled: true,
+            authenticated: false,
+            session_invalid: invalid,
+            csrf: "browser-proof",
+          }),
+          { status: 200 },
+        );
+      });
+      for (const path of ["/ai/public/chat-token", "/public/dashboards/dashboard-slug"]) {
+        await router.push(path);
+        expect(router.currentRoute.value.path).toBe(path);
+      }
+      expect(requests).not.toHaveBeenCalled();
+      await router.push("/logs");
+      expect(requests).toHaveBeenCalled();
+      expect(router.currentRoute.value.path).toBe("/login");
+      expect(store.state.loggedIn).toBe(false);
+    },
+  );
 
   // -------------------------------------------------------------------------
   // Router instance basics

@@ -3,9 +3,10 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from playwright.async_api import async_playwright
 
 parser = argparse.ArgumentParser()
@@ -23,6 +24,14 @@ if parsed.hostname not in {'127.0.0.1', 'localhost', '::1'} or parsed.username o
 for revision in [args.old_revision, args.new_revision]:
     if len(revision) != 40 or any(char not in '0123456789abcdef' for char in revision):
         raise SystemExit('Full source commit revisions are required')
+def source_url(revision, archive):
+    pattern = r"openobserve-source-" + re.escape(revision) + r"-v1\.1\.2\.[1-9][0-9]*\.tar\.gz"
+    if not re.fullmatch(pattern, archive.name):
+        raise SystemExit('Source archives must retain their revision and version in the package filename')
+    return base + '/web/assets/' + archive.name
+
+old_url = source_url(args.old_revision, args.old_archive)
+expected_new_url = source_url(args.new_revision, args.new_archive)
 receipts = {}
 
 def record(name, value):
@@ -53,7 +62,6 @@ async def main():
             cdp.on('Network.requestServedFromCache', lambda event: cached.add(urls.get(event['requestId'])))
             cdp.on('Network.responseReceived', lambda event: cached.add(event['response']['url']) if event['response'].get('fromDiskCache') else None)
             await page.goto(base + '/web/login', wait_until='domcontentloaded')
-            old_url = base + '/web/assets/source-' + args.old_revision + '.tar.gz'
             old_hash = hashlib.sha256(args.old_archive.read_bytes()).hexdigest()
             new_hash = hashlib.sha256(args.new_archive.read_bytes()).hexdigest()
             record('distinct_revision_archive_bytes', args.old_revision != args.new_revision and old_hash != new_hash)
@@ -65,8 +73,8 @@ async def main():
             await page.reload(wait_until='domcontentloaded')
             source = page.get_by_role('link', name='Source', exact=True)
             await source.wait_for()
-            new_url = await source.get_attribute('href')
-            record('new_source_link_contains_exact_revision', urlsplit(new_url).path == parsed.path + '/web/assets/source-' + args.new_revision + '.tar.gz' and new_url != old_url)
+            new_url = urljoin(page.url, await source.get_attribute('href'))
+            record('new_source_link_contains_exact_revision', new_url == expected_new_url and new_url != old_url)
             current = await fetch(page, new_url)
             record('new_revision_download_escapes_old_cache', current['status'] == 200 and current['gzip'] and current['hash'] == new_hash and current['hash'] != old_hash)
             again = await fetch(page, old_url)
