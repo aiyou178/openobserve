@@ -8,13 +8,14 @@ Thank you to the upstream authors and contributors for building and sharing Open
 This fork adds **generic OpenID Connect (OIDC) single sign-on** to the OSS edition.
 It is not an official OpenObserve release and does not enable private Enterprise code.
 
-**Fork version:** [`v1.1.2.4`](https://github.com/aiyou178/openobserve/tree/v1.1.2.4)
+**Fork version:** [`v1.1.2.5`](https://github.com/aiyou178/openobserve/tree/v1.1.2.5)
 
-**Upstream baseline:** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
+**Upstream baseline:** [`main` / `08f0d75c`](https://github.com/openobserve/openobserve/tree/08f0d75c68519932da87b784ebbdd6a28cad6fcd)
 
 **Development branch:** [`dev`](https://github.com/aiyou178/openobserve/tree/dev)
 
-Releases are tagged on the `dev` history; previous release tags retain their original commits.
+The `master` branch mirrors upstream `main`; `dev` carries this fork on top.
+Release tags retain their original commits when development is rebased.
 
 For the underlying platform, see the [OpenObserve documentation](https://openobserve.ai/docs/).
 

@@ -7,13 +7,14 @@
 本 fork 为 OSS 版本增加**通用 OpenID Connect（OIDC）单点登录支持**，
 不是 OpenObserve 官方发行版，也不启用私有 Enterprise 代码。
 
-**本 fork 版本：** [`v1.1.2.4`](https://github.com/aiyou178/openobserve/tree/v1.1.2.4)
+**本 fork 版本：** [`v1.1.2.5`](https://github.com/aiyou178/openobserve/tree/v1.1.2.5)
 
-**上游基线：** [`v1.1.2` / `d16d693`](https://github.com/openobserve/openobserve/tree/d16d693ba99bc20621a58b948ecbcad7ec7fa882)
+**上游基线：** [`main` / `08f0d75c`](https://github.com/openobserve/openobserve/tree/08f0d75c68519932da87b784ebbdd6a28cad6fcd)
 
 **开发分支：** [`dev`](https://github.com/aiyou178/openobserve/tree/dev)
 
-所有版本在 `dev` 的历史上通过 tag 标记，过往版本 tag 保留原始提交。
+`master` 同步上游 `main`，`dev` 在其上维护本 fork 的改动。
+开发分支 rebase 时，过往版本 tag 保留原始提交。
 
 平台本身的使用方法请参考 [OpenObserve 上游文档](https://openobserve.ai/docs/)。
 

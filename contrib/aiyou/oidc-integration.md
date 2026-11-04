@@ -1,8 +1,8 @@
 # OIDC operator guide
 
 This public fork adds an independently implemented OpenID Connect relying party
-to OpenObserve OSS. It is based on upstream v1.1.2
-(`d16d693ba99bc20621a58b948ecbcad7ec7fa882`), with fork release v1.1.2.4.
+to OpenObserve OSS. It is based on upstream `main`
+(`08f0d75c68519932da87b784ebbdd6a28cad6fcd`), with fork release v1.1.2.5.
 It does not enable private Enterprise modules or replace the upstream license.
 See [the fork README](../../README.md) and [中文说明](../../README.zh-CN.md).
 

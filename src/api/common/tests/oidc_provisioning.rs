@@ -158,13 +158,15 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 .unwrap();
             assert_eq!(configured, db_dir.canonicalize().unwrap());
             infra::table::create_user_tables().await.unwrap();
-            infra::table::organizations::add(
-                "default",
-                "OIDC test",
-                config::meta::organization::OrganizationType::Default,
-            )
-            .await
-            .unwrap();
+            for organization in ["default", "v2"] {
+                infra::table::organizations::add(
+                    organization,
+                    "OIDC test",
+                    config::meta::organization::OrganizationType::Default,
+                )
+                .await
+                .unwrap();
+            }
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let issuer = format!("http://{}/oidc", listener.local_addr().unwrap());
             let secret = directory.path().join("client-secret");
@@ -179,7 +181,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 absolute_seconds: 300,
                 bindings: vec![],
                 auto_provision: Some(Provisioning {
-                    default_organizations: vec!["default".into()],
+                    default_organizations: vec!["default".into(), "v2".into()],
                     allow_oss_admin: true,
                 }),
             };
@@ -224,7 +226,9 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
             assert!(session.user_id.is_some());
             let identity = oidc::identity(&settings, &session).await.unwrap();
             assert_eq!(identity.email, "first@example.com");
-            assert_eq!(identity.organizations, vec!["default"]);
+            let mut organizations = identity.organizations.clone();
+            organizations.sort();
+            assert_eq!(organizations, vec!["default", "v2"]);
             assert!(
                 db::user::get(Some("default"), &identity.email)
                     .await
@@ -243,6 +247,29 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 .unwrap();
                 assert!(!result.is_valid);
             }
+
+            for path in [
+                "/api/default/streams",
+                "/api/v2/default/alerts",
+                "/api/v2/streams",
+            ] {
+                assert!(
+                    oidc::authorize(&settings, &headers, &axum::http::Method::GET, path)
+                        .await
+                        .is_ok(),
+                    "{path}"
+                );
+            }
+            assert!(
+                oidc::authorize(
+                    &settings,
+                    &headers,
+                    &axum::http::Method::GET,
+                    "/api/v2/other/alerts",
+                )
+                .await
+                .is_err()
+            );
 
             provider.email_scope.store(true, Ordering::SeqCst);
             let (browser, state) = start_login(&settings, &provider, "first-subject", "openid profile").await;
