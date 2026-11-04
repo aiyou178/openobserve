@@ -96,6 +96,13 @@ export default function (store: any) {
       document.title = "OpenObserve";
     }
 
+    // Public routes (unauthenticated viewer plane) opt out of the auth guard
+    // entirely — never redirect an anonymous visitor to /login.
+    if (to.meta && to.meta.public) {
+      next();
+      return;
+    }
+
     try {
       const session = await bootstrapOidc();
       if (session.enabled && session.authenticated && session.user) {
@@ -142,13 +149,6 @@ export default function (store: any) {
     }
 
     const isAuthenticated = store.state.loggedIn;
-
-    // Public routes (unauthenticated viewer plane) opt out of the auth guard
-    // entirely — never redirect an anonymous visitor to /login.
-    if (to.meta && to.meta.public) {
-      next();
-      return;
-    }
 
     if (
       !isAuthenticated &&

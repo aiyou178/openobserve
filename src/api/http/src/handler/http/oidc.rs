@@ -258,8 +258,6 @@ pub async fn authenticate(mut request: Request, next: Next) -> Response {
         Err(_) => return failure(StatusCode::UNAUTHORIZED),
     };
     let path = request.uri().path().trim_start_matches('/');
-    let path = path.strip_prefix("api/").unwrap_or(path);
-    let path = path.strip_prefix("v2/").unwrap_or(path);
     let org_list = path == "organizations" && request.method() == Method::GET;
     let Ok(email) = HeaderValue::from_str(&identity.email) else {
         return failure(StatusCode::UNAUTHORIZED);

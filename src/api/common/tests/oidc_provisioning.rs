@@ -23,8 +23,10 @@ use std::{
 
 use axum::{
     Form, Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, Request, State},
     http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
+    response::IntoResponse,
     routing::{get, post},
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -158,7 +160,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 .unwrap();
             assert_eq!(configured, db_dir.canonicalize().unwrap());
             infra::table::create_user_tables().await.unwrap();
-            for organization in ["default", "v2"] {
+            for organization in ["default", "v2", "streams", "api"] {
                 infra::table::organizations::add(
                     organization,
                     "OIDC test",
@@ -181,7 +183,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 absolute_seconds: 300,
                 bindings: vec![],
                 auto_provision: Some(Provisioning {
-                    default_organizations: vec!["default".into(), "v2".into()],
+                    default_organizations: vec!["default".into(), "v2".into(), "streams".into()],
                     allow_oss_admin: true,
                 }),
             };
@@ -228,7 +230,7 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
             assert_eq!(identity.email, "first@example.com");
             let mut organizations = identity.organizations.clone();
             organizations.sort();
-            assert_eq!(organizations, vec!["default", "v2"]);
+            assert_eq!(organizations, vec!["default", "streams", "v2"]);
             assert!(
                 db::user::get(Some("default"), &identity.email)
                     .await
@@ -248,28 +250,58 @@ fn verified_callback_creates_a_usable_session_and_policy_changes_revoke_admissio
                 assert!(!result.is_valid);
             }
 
-            for path in [
-                "/api/default/streams",
-                "/api/v2/default/alerts",
-                "/api/v2/streams",
-            ] {
-                assert!(
-                    oidc::authorize(&settings, &headers, &axum::http::Method::GET, path)
-                        .await
-                        .is_ok(),
-                    "{path}"
-                );
-            }
-            assert!(
-                oidc::authorize(
-                    &settings,
-                    &headers,
-                    &axum::http::Method::GET,
-                    "/api/v2/other/alerts",
-                )
-                .await
-                .is_err()
+            let organization_route = get(|Path(org): Path<String>| async move {
+                Json(json!({"organization": org}))
+            });
+            let api = Router::new().nest(
+                "/api",
+                Router::new()
+                    .route("/{org_id}/streams", organization_route.clone())
+                    .route("/v2/{org_id}/alerts", organization_route)
+                    .layer(middleware::from_fn_with_state(
+                        settings.clone(),
+                        |State(policy): State<Settings>, request: Request, next: Next| async move {
+                            if oidc::authorize(
+                                &policy,
+                                request.headers(),
+                                request.method(),
+                                request.uri().path(),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                return StatusCode::UNAUTHORIZED.into_response();
+                            }
+                            next.run(request).await
+                        },
+                    )),
             );
+            let api_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let api_url = format!("http://{}", api_listener.local_addr().unwrap());
+            let api_server = tokio::spawn(async move { axum::serve(api_listener, api).await.unwrap() });
+            let client = reqwest::Client::new();
+            for (path, organization) in [
+                ("/api/default/streams", Some("default")),
+                ("/api/v2/default/alerts", Some("default")),
+                ("/api/v2/streams", Some("v2")),
+                ("/api/streams/streams", Some("streams")),
+                ("/api/api/streams", None),
+                ("/api/v2/other/alerts", None),
+            ] {
+                let response = client
+                    .get(format!("{api_url}{path}"))
+                    .header(header::COOKIE, headers[header::COOKIE].clone())
+                    .send()
+                    .await
+                    .unwrap();
+                if let Some(organization) = organization {
+                    assert_eq!(response.status(), StatusCode::OK, "{path}");
+                    assert_eq!(response.json::<Value>().await.unwrap(), json!({"organization": organization}));
+                } else {
+                    assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+                }
+            }
+            api_server.abort();
 
             provider.email_scope.store(true, Ordering::SeqCst);
             let (browser, state) = start_login(&settings, &provider, "first-subject", "openid profile").await;
