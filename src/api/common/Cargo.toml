@@ -11,7 +11,6 @@ path = "src/lib.rs"
 [features]
 default = []
 enterprise = [
-    "dep:jsonwebtoken",
     "dep:o2_dex",
     "dep:o2_enterprise",
     "dep:o2_openfga",
@@ -39,7 +38,7 @@ common.workspace = true
 config.workspace = true
 db.workspace = true
 infra.workspace = true
-jsonwebtoken = { workspace = true, optional = true }
+jsonwebtoken.workspace = true
 log.workspace = true
 o2_dex = { workspace = true, optional = true }
 o2_enterprise = { workspace = true, optional = true, default-features = false }
