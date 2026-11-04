@@ -610,6 +610,7 @@ pub async fn list_oidc_orgs_by_user(
         .column(organizations::Column::OrgName)
         .column(organizations::Column::OrgType)
         .column(Column::AllowStaticToken)
+        .column_as(organizations::Column::CreatedAt, "org_created_at")
         .into_model::<UserOrgExpandedRecord>()
         .all(client)
         .await
