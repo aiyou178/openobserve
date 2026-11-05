@@ -27,6 +27,7 @@ function createMockCorrelationData(overrides: Record<string, any> = {}) {
     session_id: "test-session-123",
     rum_events: [],
     backend_spans: [{ span_id: "span1" }, { span_id: "span2" }],
+    backend_spans_complete: true,
     has_backend_trace: true,
     performance_breakdown: {
       total_duration_ms: 500,
@@ -458,6 +459,31 @@ describe("TraceCorrelationCard", () => {
   // =========================================================================
 
   describe("action buttons", () => {
+    it("opens the whole trace when its backend span sample is incomplete", async () => {
+      await wrapper.setProps({ traceId: navigationTraceId, spanId: "79b0553002e94471" });
+      mockCorrelationDataRef.value = createMockCorrelationData({
+        trace_id: navigationTraceId,
+        backend_spans_complete: false,
+        backend_spans: [
+          { span_id: "64d250a84295e136", reference_parent_span_id: "79b0553002e94471" },
+        ],
+      });
+      await nextTick();
+      const resolve = vi.spyOn(router, "resolve");
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      await findButtonByText(wrapper, "View Trace Details")!.trigger("click");
+      expect(resolve).toHaveBeenCalledWith({
+        name: "traceDetails",
+        query: {
+          stream: "payments_traces",
+          trace_id: navigationTraceId,
+          from: 1_700_000_000_000_000,
+          to: 1_700_000_090_000_000,
+          org_identifier: store.state.selectedOrganization.identifier,
+        },
+      });
+    });
+
     it("opens the discovered trace and selects its actual backend child span", async () => {
       const browserParent = "79b0553002e94471";
       const backendSpan = "64d250a84295e136";

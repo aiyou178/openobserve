@@ -27,6 +27,7 @@ export interface TraceCorrelationData {
   session_id: string | null;
   rum_events: any[];
   backend_spans: any[];
+  backend_spans_complete: boolean;
   has_backend_trace: boolean;
   performance_breakdown: {
     total_duration_ms: number;
@@ -140,6 +141,7 @@ export default function useTraceCorrelation(
       // stream), using the canonical padded id — the traces stream always
       // stores the full 32-char form.
       let backendSpans: any[] = [];
+      let backendSpansComplete = false;
       let hasTrace = false;
 
       const location = await resolveTraceLocation(canonicalTraceId, range.startTime, range.endTime);
@@ -169,6 +171,19 @@ export default function useTraceCorrelation(
         );
 
         backendSpans = traceResponse.data.hits || [];
+        const total: unknown = traceResponse.data.total;
+        const functionError: unknown = traceResponse.data.function_error;
+        const hasFunctionError = Array.isArray(functionError)
+          ? functionError.length > 0
+          : Boolean(functionError);
+        backendSpansComplete =
+          backendSpans.length < traceQuery.query.size &&
+          typeof total === "number" &&
+          Number.isFinite(total) &&
+          total >= 0 &&
+          total === backendSpans.length &&
+          !traceResponse.data.is_partial &&
+          !hasFunctionError;
         hasTrace = backendSpans.length > 0;
       } catch (traceError) {
         if (version !== fetchVersion) return;
@@ -208,6 +223,7 @@ export default function useTraceCorrelation(
         session_id: rumEvents[0]?.session_id || null,
         rum_events: rumEvents,
         backend_spans: backendSpans,
+        backend_spans_complete: backendSpansComplete,
         has_backend_trace: hasTrace,
         performance_breakdown: performanceBreakdown,
       };

@@ -173,6 +173,58 @@ describe("useTraceCorrelation", () => {
   });
 
   describe("fetchCorrelation", () => {
+    it.each([
+      { reason: "complete result", hitCount: 1, total: 1, extra: {}, complete: true },
+      { reason: "result at the limit", hitCount: 100, total: 100, extra: {}, complete: false },
+      { reason: "larger total", hitCount: 1, total: 2, extra: {}, complete: false },
+      { reason: "smaller total", hitCount: 1, total: 0, extra: {}, complete: false },
+      {
+        reason: "partial result",
+        hitCount: 1,
+        total: 1,
+        extra: { is_partial: true },
+        complete: false,
+      },
+      {
+        reason: "function error",
+        hitCount: 1,
+        total: 1,
+        extra: { function_error: ["search timed out"] },
+        complete: false,
+      },
+      {
+        reason: "empty function errors",
+        hitCount: 1,
+        total: 1,
+        extra: { function_error: [] },
+        complete: true,
+      },
+      {
+        reason: "legacy function error",
+        hitCount: 1,
+        total: 1,
+        extra: { function_error: "search timed out" },
+        complete: false,
+      },
+      { reason: "unknown total", hitCount: 1, total: undefined, extra: {}, complete: false },
+    ])(
+      "marks backend span completeness conservatively for $reason",
+      async ({ hitCount, total, extra, complete }) => {
+        const backendResponse = createMockSearchResponse(
+          Array.from({ length: hitCount }, (_, index) =>
+            createMockBackendSpan({ span_id: `span-${index}` }),
+          ),
+        );
+        backendResponse.data = { ...backendResponse.data, total, ...extra };
+        vi.mocked(searchService.search)
+          .mockResolvedValueOnce(createMockSearchResponse([]))
+          .mockResolvedValueOnce(backendResponse);
+        const { fetchCorrelation, correlationData } = useTraceCorrelation(ref("2"), t);
+        await fetchCorrelation();
+        expect(correlationData.value?.backend_spans_complete).toBe(complete);
+      },
+    );
+
     it.each(["reset", "new fetch"])(
       "does not restore stale correlation after %s",
       async (action) => {

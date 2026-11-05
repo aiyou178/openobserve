@@ -321,7 +321,7 @@ const viewTraceDetails = () => {
   const location = traceLocation.value;
   if (!canViewTrace.value || !location) return;
   const backendSpanIds = new Set<string>();
-  if (props.spanId) {
+  if (props.spanId && correlationData.value?.backend_spans_complete) {
     for (const span of correlationData.value?.backend_spans ?? []) {
       if (
         span.reference_parent_span_id === props.spanId &&
