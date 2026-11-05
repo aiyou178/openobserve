@@ -60,6 +60,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             <TraceCorrelationCard
               v-if="errorTraceId"
               :trace-id="errorTraceId"
+              :span-id="errorSpanId"
               :session-id="errorDetails.session_id || ''"
               :timestamp="errorDetails._timestamp || 0"
               data-test="error-viewer-trace-correlation"
@@ -95,7 +96,10 @@ import useErrorTracking from "@/composables/useErrorTracking";
 import useErrorDetail from "@/composables/rum/useErrorDetail";
 import useStreams from "@/composables/useStreams";
 import searchService from "@/services/search";
-import { errorTraceId as resolveErrorTraceId } from "@/utils/rum/errorTraceCorrelation";
+import {
+  errorTraceId as resolveErrorTraceId,
+  errorSpanId as resolveErrorSpanId,
+} from "@/utils/rum/errorTraceCorrelation";
 import { buildBreadcrumbsSql, type ErrorDetailContext } from "@/utils/rum/errorDetailQueries";
 import { useI18nTyped } from "@/types/i18n";
 import OSpinner from "@/lib/feedback/Spinner/OSpinner.vue";
@@ -148,6 +152,7 @@ const getTimestamp = computed(() => {
 });
 
 const errorTraceId = computed(() => resolveErrorTraceId(errorDetails.value));
+const errorSpanId = computed(() => resolveErrorSpanId(errorDetails.value));
 
 /**
  * The window the issue-level aggregates are computed over. It mirrors the range

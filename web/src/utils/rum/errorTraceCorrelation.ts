@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import { normalizeTraceId, rumField } from "./fields";
+import { normalizeTraceId } from "./fields";
 
 type RumEvent = Record<string, unknown>;
 
@@ -57,8 +57,58 @@ function requestMatches(left: string, right: string): boolean {
   }
 }
 
+function validTraceId(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const traceId = normalizeTraceId(value);
+  return /^0+$/.test(traceId) ? "" : traceId;
+}
+
+function validSpanId(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const spanId = value.trim().toLowerCase();
+  return /^[0-9a-f]{16}$/.test(spanId) && !/^0+$/.test(spanId) ? spanId : "";
+}
+
+function traceContexts(event: RumEvent): { traceId: string; spanId: string }[] {
+  const context = isRecord(event.context) ? event.context : {};
+  const o2 = isRecord(event._o2) ? event._o2 : {};
+  const oo = isRecord(event._oo) ? event._oo : {};
+  const pairs = [
+    [event._o2_trace_id, event._o2_span_id],
+    [event._oo_trace_id, event._oo_span_id],
+    [o2.trace_id, o2.span_id],
+    [oo.trace_id, oo.span_id],
+    [event.context_trace_id, event.context_parent_span_id],
+    [event.context_traceid, event.context_parentspanid],
+    [context.trace_id, context.parent_span_id],
+    [context.traceId, context.parentSpanId],
+  ];
+  const contexts = pairs.map(([traceId, spanId]) => ({
+    traceId: validTraceId(traceId),
+    spanId: validSpanId(spanId),
+  }));
+  for (const value of [event.context_traceparent, context.traceparent]) {
+    if (typeof value !== "string") continue;
+    const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/i.exec(value.trim());
+    if (!match) continue;
+    const traceId = validTraceId(match[1]);
+    const spanId = validSpanId(match[2]);
+    if (traceId && spanId) contexts.push({ traceId, spanId });
+  }
+  return contexts.filter(({ traceId }) => traceId !== "");
+}
+
+export function errorSpanId(error: RumEvent): string {
+  const traceId = errorTraceId(error);
+  if (!traceId) return "";
+  return (
+    traceContexts(error).find((context) => context.traceId === traceId && context.spanId)?.spanId ??
+    ""
+  );
+}
+
 export function errorTraceId(error: RumEvent): string {
-  const directTrace = normalizeTraceId(rumField<unknown>(error, "trace_id"));
+  const directTrace = traceContexts(error)[0]?.traceId;
   if (directTrace) return directTrace;
 
   const errorResource =
@@ -105,7 +155,7 @@ export function errorTraceId(error: RumEvent): string {
       Math.abs(timestamp - resourceTime - durationUs),
     );
     if (distance > REQUEST_TIME_TOLERANCE_US) continue;
-    const trace = normalizeTraceId(rumField<unknown>(event, "trace_id"));
+    const trace = traceContexts(event)[0]?.traceId;
     if (!trace) return "";
     traces.add(trace);
   }

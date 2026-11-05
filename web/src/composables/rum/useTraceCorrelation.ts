@@ -52,8 +52,10 @@ export default function useTraceCorrelation(
   const { getStream } = useStreams(t);
   const { resolveTraceLocation, cancel: cancelTracesStream } = useCorrelatedTracesStream(t);
   const correlationData = ref<TraceCorrelationData | null>(null);
+  const traceLocation = ref<(CorrelationTimeRange & { stream: string }) | null>(null);
   const isLoading = ref(false);
   const error = ref<Error | null>(null);
+  let fetchVersion = 0;
 
   // Callers correlating a specific event (e.g. an error) pass its time
   // range; without one we fall back to the trailing hour.
@@ -80,8 +82,11 @@ export default function useTraceCorrelation(
    * Uses existing searchService.search with _rumdata stream
    */
   const fetchCorrelation = async () => {
+    const version = ++fetchVersion;
+    traceLocation.value = null;
+    correlationData.value = null;
     if (!traceId.value) {
-      correlationData.value = null;
+      isLoading.value = false;
       return;
     }
 
@@ -106,11 +111,6 @@ export default function useTraceCorrelation(
         "trace_id",
         idVariants.length ? idVariants : [sanitized],
       );
-      if (!traceIdPredicate) {
-        correlationData.value = null;
-        return;
-      }
-
       // Query RUM data for this trace ID
       const rumQuery = {
         query: {
@@ -122,16 +122,18 @@ export default function useTraceCorrelation(
         },
       };
 
-      const rumResponse = await searchService.search(
-        {
-          org_identifier: store.state.selectedOrganization.identifier,
-          query: rumQuery,
-          page_type: "logs",
-        },
-        "RUM",
-      );
+      const rumResponse = traceIdPredicate
+        ? await searchService.search(
+            {
+              org_identifier: store.state.selectedOrganization.identifier,
+              query: rumQuery,
+              page_type: "logs",
+            },
+            "RUM",
+          )
+        : null;
 
-      const rumEvents = rumResponse.data.hits || [];
+      const rumEvents = rumResponse?.data.hits || [];
 
       // Try to query backend trace data from whichever traces stream actually
       // contains this trace (discovered + cached; falls back to the default
@@ -169,9 +171,12 @@ export default function useTraceCorrelation(
         backendSpans = traceResponse.data.hits || [];
         hasTrace = backendSpans.length > 0;
       } catch (traceError) {
+        if (version !== fetchVersion) return;
         error.value =
           traceError instanceof Error ? traceError : new Error("Backend trace query failed");
       }
+
+      if (version !== fetchVersion) return;
 
       // Calculate performance breakdown
       let performanceBreakdown = null;
@@ -197,6 +202,7 @@ export default function useTraceCorrelation(
         }
       }
 
+      traceLocation.value = { stream: tracesStream, ...traceWindow };
       correlationData.value = {
         trace_id: canonicalTraceId,
         session_id: rumEvents[0]?.session_id || null,
@@ -206,15 +212,18 @@ export default function useTraceCorrelation(
         performance_breakdown: performanceBreakdown,
       };
     } catch (e) {
+      if (version !== fetchVersion) return;
       error.value = e as Error;
       console.error("Failed to fetch trace correlation:", e);
       correlationData.value = null;
     } finally {
-      isLoading.value = false;
+      if (version === fetchVersion) isLoading.value = false;
     }
   };
 
   const reset = () => {
+    fetchVersion++;
+    traceLocation.value = null;
     correlationData.value = null;
     isLoading.value = false;
     error.value = null;
@@ -222,6 +231,7 @@ export default function useTraceCorrelation(
 
   return {
     correlationData: computed(() => correlationData.value),
+    traceLocation: computed(() => traceLocation.value),
     isLoading: computed(() => isLoading.value),
     error: computed(() => error.value),
     hasBackendTrace,

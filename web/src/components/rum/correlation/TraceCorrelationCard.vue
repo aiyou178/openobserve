@@ -162,7 +162,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           <OButton
             variant="outline"
             size="sm-action"
-            :disabled="!hasBackendTrace"
+            :disabled="!canViewTrace"
+            data-test="trace-correlation-card-view-trace"
             @click="viewTraceDetails"
           >
             <OIcon name="git-branch" size="sm" class="me-1" />
@@ -206,8 +207,13 @@ import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import { toast } from "@/lib/feedback/Toast/useToast";
 import OSeparator from "@/lib/core/Separator/OSeparator.vue";
 import { useI18nTyped } from "@/types/i18n";
+import { useRouter } from "vue-router";
+import { useStore } from "vuex";
+import { normalizeTraceId } from "@/utils/rum/fields";
 
 const { t } = useI18nTyped();
+const router = useRouter();
+const store = useStore();
 
 const props = defineProps({
   traceId: {
@@ -246,6 +252,8 @@ const correlationRange = computed(() =>
 );
 
 const {
+  correlationData,
+  traceLocation,
   isLoading,
   error,
   hasBackendTrace,
@@ -258,6 +266,17 @@ const {
   t,
   correlationRange,
 );
+
+const canViewTrace = computed(() => {
+  const traceId = normalizeTraceId(props.traceId);
+  return Boolean(
+    traceId &&
+    traceId !== "0".repeat(32) &&
+    hasBackendTrace.value &&
+    traceLocation.value &&
+    correlationData.value?.trace_id === traceId,
+  );
+});
 
 onUnmounted(() => cancelTracesStream());
 
@@ -299,12 +318,33 @@ const copyTraceId = () => {
 };
 
 const viewTraceDetails = () => {
-  // TODO: Navigate to trace detail view
-  // This will be implemented once we know the trace viewer route
-  toast({
-    variant: "info",
-    message: t("toastMessages.correlation.traceDetailViewComingSoon"),
+  const location = traceLocation.value;
+  if (!canViewTrace.value || !location) return;
+  const backendSpanIds = new Set<string>();
+  if (props.spanId) {
+    for (const span of correlationData.value?.backend_spans ?? []) {
+      if (
+        span.reference_parent_span_id === props.spanId &&
+        /^[0-9a-f]{16}$/i.test(span.span_id) &&
+        !/^0+$/.test(span.span_id)
+      ) {
+        backendSpanIds.add(span.span_id);
+      }
+    }
+  }
+  const spanId = backendSpanIds.size === 1 ? backendSpanIds.values().next().value : undefined;
+  const route = router.resolve({
+    name: "traceDetails",
+    query: {
+      stream: location.stream,
+      trace_id: normalizeTraceId(props.traceId),
+      ...(spanId ? { span_id: spanId } : {}),
+      from: location.startTime,
+      to: location.endTime,
+      org_identifier: store.state.selectedOrganization.identifier,
+    },
   });
+  window.open(route.href, "_blank", "noopener");
 };
 
 const refreshTraceData = () => {

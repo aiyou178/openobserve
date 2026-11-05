@@ -69,6 +69,7 @@ Object.assign(navigator, {
 // Mock useTraceCorrelation — mutable refs
 // ---------------------------------------------------------------------------
 
+const navigationTraceId = "0123456789abcdef0123456789abcdef";
 const mockFetchCorrelation = vi.fn();
 let mockIsLoading = ref(false);
 const mockError = ref<Error | null>(null);
@@ -76,10 +77,16 @@ let mockCorrelationDataRef = ref<any>(createMockCorrelationData());
 let mockHasBackendTrace = ref(true);
 let mockBackendSpanCount = ref(2);
 let mockPerformanceData = ref<any>(createMockPerformanceData());
+const mockTraceLocation = ref<{ stream: string; startTime: number; endTime: number } | null>({
+  stream: "payments_traces",
+  startTime: 1_700_000_000_000_000,
+  endTime: 1_700_000_090_000_000,
+});
 
 vi.mock("@/composables/rum/useTraceCorrelation", () => ({
   default: () => ({
     correlationData: mockCorrelationDataRef,
+    traceLocation: mockTraceLocation,
     isLoading: mockIsLoading,
     error: mockError,
     hasBackendTrace: mockHasBackendTrace,
@@ -166,6 +173,11 @@ describe("TraceCorrelationCard", () => {
     mockFetchCorrelation.mockResolvedValue(undefined);
 
     mockIsLoading.value = false;
+    mockTraceLocation.value = {
+      stream: "payments_traces",
+      startTime: 1_700_000_000_000_000,
+      endTime: 1_700_000_090_000_000,
+    };
     mockError.value = null;
     mockCorrelationDataRef.value = createMockCorrelationData();
     mockHasBackendTrace.value = true;
@@ -446,6 +458,90 @@ describe("TraceCorrelationCard", () => {
   // =========================================================================
 
   describe("action buttons", () => {
+    it("opens the discovered trace and selects its actual backend child span", async () => {
+      const browserParent = "79b0553002e94471";
+      const backendSpan = "64d250a84295e136";
+      const traceId = navigationTraceId;
+      await wrapper.setProps({ traceId, spanId: browserParent });
+      mockCorrelationDataRef.value = createMockCorrelationData({
+        trace_id: traceId,
+        backend_spans: [
+          { span_id: "aabbccddeeff0011", reference_parent_span_id: "other-parent" },
+          { span_id: backendSpan, reference_parent_span_id: browserParent },
+        ],
+      });
+      await nextTick();
+      const resolve = vi.spyOn(router, "resolve");
+      const open = vi.spyOn(window, "open").mockImplementation(() => null);
+      await findButtonByText(wrapper, "View Trace Details")!.trigger("click");
+      expect(resolve).toHaveBeenCalledWith({
+        name: "traceDetails",
+        query: {
+          stream: "payments_traces",
+          trace_id: traceId,
+          span_id: backendSpan,
+          from: 1_700_000_000_000_000,
+          to: 1_700_000_090_000_000,
+          org_identifier: store.state.selectedOrganization.identifier,
+        },
+      });
+      expect(open).toHaveBeenCalled();
+      expect(open.mock.calls[0][0]).toContain(`span_id=${backendSpan}`);
+    });
+
+    it.each([
+      { reason: "missing spans", spans: [] },
+      {
+        reason: "no matching parent",
+        spans: [{ span_id: "aabbccddeeff0011", reference_parent_span_id: "different-parent" }],
+      },
+      {
+        reason: "ambiguous children",
+        spans: [
+          { span_id: "aabbccddeeff0011", reference_parent_span_id: "79b0553002e94471" },
+          { span_id: "aabbccddeeff0022", reference_parent_span_id: "79b0553002e94471" },
+        ],
+      },
+    ])("opens the whole trace with $reason", async ({ spans }) => {
+      await wrapper.setProps({ traceId: navigationTraceId, spanId: "79b0553002e94471" });
+      mockCorrelationDataRef.value = createMockCorrelationData({
+        trace_id: navigationTraceId,
+        backend_spans: spans,
+      });
+      await nextTick();
+      const resolve = vi.spyOn(router, "resolve");
+      vi.spyOn(window, "open").mockImplementation(() => null);
+      await findButtonByText(wrapper, "View Trace Details")!.trigger("click");
+      expect(resolve).toHaveBeenCalledWith({
+        name: "traceDetails",
+        query: {
+          stream: "payments_traces",
+          trace_id: navigationTraceId,
+          from: 1_700_000_000_000_000,
+          to: 1_700_000_090_000_000,
+          org_identifier: store.state.selectedOrganization.identifier,
+        },
+      });
+    });
+
+    it.each(["no backend", "no location", "stale trace"])(
+      "does not navigate with %s",
+      async (unavailable) => {
+        await wrapper.setProps({ traceId: navigationTraceId });
+        mockCorrelationDataRef.value = createMockCorrelationData({ trace_id: navigationTraceId });
+        if (unavailable === "no backend") mockHasBackendTrace.value = false;
+        else if (unavailable === "no location") mockTraceLocation.value = null;
+        else
+          mockCorrelationDataRef.value = createMockCorrelationData({
+            trace_id: "fedcba9876543210fedcba9876543210",
+          });
+        await nextTick();
+        const open = vi.spyOn(window, "open").mockImplementation(() => null);
+        await findButtonByText(wrapper, "View Trace Details")!.trigger("click");
+        expect(open).not.toHaveBeenCalled();
+      },
+    );
+
     it("displays View Trace Details button", () => {
       // Act
       const viewBtn = findButtonByText(wrapper, "View Trace Details");
@@ -455,8 +551,10 @@ describe("TraceCorrelationCard", () => {
       expect(viewBtn?.exists()).toBe(true);
     });
 
-    it("enables View Trace Details button when backend trace exists", () => {
-      // Act
+    it("enables View Trace Details button when backend trace exists", async () => {
+      await wrapper.setProps({ traceId: navigationTraceId });
+      mockCorrelationDataRef.value = createMockCorrelationData({ trace_id: navigationTraceId });
+      await nextTick();
       const viewBtn = findButtonByText(wrapper, "View Trace Details");
 
       // Assert

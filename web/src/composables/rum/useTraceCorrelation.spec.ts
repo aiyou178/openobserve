@@ -173,6 +173,114 @@ describe("useTraceCorrelation", () => {
   });
 
   describe("fetchCorrelation", () => {
+    it.each(["reset", "new fetch"])(
+      "does not restore stale correlation after %s",
+      async (action) => {
+        let releaseOld!: (response: Awaited<ReturnType<typeof searchService.search>>) => void;
+        let signalOldStarted!: () => void;
+        const oldStarted = new Promise<void>((resolve) => {
+          signalOldStarted = resolve;
+        });
+        const oldBackend = new Promise<Awaited<ReturnType<typeof searchService.search>>>(
+          (resolve) => {
+            releaseOld = resolve;
+          },
+        );
+        vi.mocked(searchService.search)
+          .mockResolvedValueOnce(createMockSearchResponse([]))
+          .mockImplementationOnce(() => {
+            signalOldStarted();
+            return oldBackend;
+          });
+        const traceId = ref("1");
+        const { fetchCorrelation, correlationData, traceLocation, isLoading, reset } =
+          useTraceCorrelation(traceId, t);
+        const oldFetch = fetchCorrelation();
+        await oldStarted;
+
+        let newFetch: Promise<void> | undefined;
+        let releaseNew!: (response: Awaited<ReturnType<typeof searchService.search>>) => void;
+        if (action === "reset") {
+          reset();
+        } else {
+          traceId.value = "2";
+          const newBackend = new Promise<Awaited<ReturnType<typeof searchService.search>>>(
+            (resolve) => {
+              releaseNew = resolve;
+            },
+          );
+          vi.mocked(searchService.search)
+            .mockResolvedValueOnce(createMockSearchResponse([]))
+            .mockImplementationOnce(() => newBackend);
+          newFetch = fetchCorrelation();
+        }
+
+        releaseOld(createMockSearchResponse([createMockBackendSpan({ span_id: "old-span" })]));
+        await oldFetch;
+        expect(correlationData.value).toBeNull();
+        expect(traceLocation.value).toBeNull();
+        expect(isLoading.value).toBe(action === "new fetch");
+        if (newFetch) {
+          releaseNew(createMockSearchResponse([createMockBackendSpan({ span_id: "new-span" })]));
+          await newFetch;
+          expect(correlationData.value?.trace_id).toBe("00000000000000000000000000000002");
+          expect(correlationData.value?.backend_spans[0].span_id).toBe("new-span");
+          expect(traceLocation.value).not.toBeNull();
+        }
+      },
+    );
+
+    it("queries backend spans even when the RUM schema has no SDK trace column", async () => {
+      mockGetStream.mockResolvedValueOnce({ schema: [] });
+      vi.mocked(searchService.search).mockResolvedValueOnce(
+        createMockSearchResponse([createMockBackendSpan()]),
+      );
+      const { fetchCorrelation, correlationData, hasBackendTrace } = useTraceCorrelation(
+        ref("2"),
+        t,
+      );
+      await fetchCorrelation();
+      expect(searchService.search).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(searchService.search).mock.calls[0][0].page_type).toBe("traces");
+      expect(correlationData.value?.rum_events).toEqual([]);
+      expect(hasBackendTrace.value).toBe(true);
+    });
+
+    it("exposes the discovered stream and padded query window for navigation", async () => {
+      mockResolveTraceLocation.mockResolvedValueOnce({
+        stream: "payments_traces",
+        range: { start_time: 1_700_000_000_000_000, end_time: 1_700_000_090_000_000 },
+      });
+      mockSuccessfulSearch([], [createMockBackendSpan()]);
+      const { fetchCorrelation, traceLocation } = useTraceCorrelation(ref("2"), t);
+      await fetchCorrelation();
+      expect(traceLocation.value).toEqual({
+        stream: "payments_traces",
+        startTime: 1_700_000_000_000_000 - 60_000_000,
+        endTime: 1_700_000_090_000_000 + 60_000_000,
+      });
+    });
+
+    it("clears navigation metadata at the next fetch and on reset", async () => {
+      mockSuccessfulSearch([], [createMockBackendSpan()]);
+      const traceId = ref("2");
+      const { fetchCorrelation, traceLocation, reset } = useTraceCorrelation(traceId, t);
+      await fetchCorrelation();
+      expect(traceLocation.value).not.toBeNull();
+      mockSuccessfulSearch([], [createMockBackendSpan()]);
+      const nextFetch = fetchCorrelation();
+      expect(traceLocation.value).toBeNull();
+      await nextFetch;
+      expect(traceLocation.value).not.toBeNull();
+      reset();
+      expect(traceLocation.value).toBeNull();
+      mockSuccessfulSearch([], [createMockBackendSpan()]);
+      await fetchCorrelation();
+      traceId.value = "";
+      await fetchCorrelation();
+      expect(traceLocation.value).toBeNull();
+    });
+
     it("should not fetch when traceId is empty", async () => {
       const traceId = ref("");
       const { fetchCorrelation } = useTraceCorrelation(traceId, t);

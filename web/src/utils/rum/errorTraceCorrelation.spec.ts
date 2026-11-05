@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorTraceId } from "./errorTraceCorrelation";
+import { errorSpanId, errorTraceId } from "./errorTraceCorrelation";
 
 const timestamp = 1_700_000_000_000_000;
 const trace = "00000000000000000000000000000002";
@@ -142,5 +142,81 @@ describe("errorTraceId", () => {
     expect(
       errorTraceId(error([resource({ resource_status_code: 200 })], { context_http_status: "" })),
     ).toBe("");
+  });
+});
+
+const parentSpan = "79b0553002e94471";
+const traceparent = `00-${trace}-${parentSpan}-01`;
+
+describe("application trace context", () => {
+  it.each([
+    { _o2: { trace_id: trace } },
+    { _oo: { trace_id: trace } },
+    { context_trace_id: trace },
+    { context_traceid: trace },
+    { context: { trace_id: trace } },
+    { context: { traceId: trace } },
+    { context_traceparent: traceparent },
+    { context: { traceparent } },
+  ])("reads historical and current context spellings: %j", (context) => {
+    expect(errorTraceId(context)).toBe(trace);
+  });
+
+  it("uses explicit application context before a different resource breadcrumb", () => {
+    expect(
+      errorTraceId(
+        error([resource({ _o2_trace_id: otherTrace })], {
+          context_trace_id: trace,
+        }),
+      ),
+    ).toBe(trace);
+  });
+
+  it.each([
+    { context_trace_id: "00000000000000000000000000000000" },
+    { context_trace_id: "not-a-trace" },
+    { context_traceparent: `00-${trace}-0000000000000000-01` },
+    { context_traceparent: `00-${"0".repeat(32)}-${parentSpan}-01` },
+    { context_traceparent: `ff-${trace}-${parentSpan}-01` },
+    { context_traceparent: `00-${trace}-${parentSpan}-01-extra` },
+  ])("does not expose invalid application trace evidence: %j", (context) => {
+    expect(errorTraceId(context)).toBe("");
+    expect(errorSpanId(context)).toBe("");
+  });
+
+  it.each([
+    { _o2_trace_id: trace, _o2_span_id: parentSpan },
+    { _oo_trace_id: trace, _oo_span_id: parentSpan },
+    { _o2: { trace_id: trace, span_id: parentSpan } },
+    { _oo: { trace_id: trace, span_id: parentSpan } },
+    { context_trace_id: trace, context_parent_span_id: parentSpan },
+    { context_traceid: trace, context_parentspanid: parentSpan },
+    { context: { trace_id: trace, parent_span_id: parentSpan } },
+    { context: { traceId: trace, parentSpanId: parentSpan } },
+    { context_traceparent: traceparent },
+    { context: { traceparent } },
+  ])("extracts the propagated browser parent with its trace: %j", (context) => {
+    expect(errorSpanId(context)).toBe(parentSpan);
+  });
+
+  it("prefers the SDK span paired with the selected SDK trace over application context", () => {
+    expect(
+      errorSpanId({
+        _o2_trace_id: trace,
+        _o2_span_id: parentSpan,
+        context_trace_id: otherTrace,
+        context_parent_span_id: "1111111111111111",
+      }),
+    ).toBe(parentSpan);
+  });
+
+  it.each([
+    { context_parent_span_id: parentSpan },
+    { context_trace_id: trace, context_parent_span_id: "0000000000000000" },
+    { context_trace_id: trace, context_parent_span_id: "invalid-span" },
+    { _o2_trace_id: otherTrace, context_trace_id: trace, context_parent_span_id: parentSpan },
+    { context_trace_id: trace, context_traceparent: `00-${otherTrace}-${parentSpan}-01` },
+  ])("does not attach a parent from unassociated or invalid context: %j", (context) => {
+    expect(errorSpanId(context)).toBe("");
   });
 });

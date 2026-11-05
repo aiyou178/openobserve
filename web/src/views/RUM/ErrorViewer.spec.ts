@@ -313,6 +313,19 @@ describe("ErrorViewer.vue", () => {
       await nextTick();
     };
 
+    it("passes application trace and propagated parent into the real correlation card", async () => {
+      await seedErrorDetails({
+        error_id: "application-context-error",
+        context_traceid: "0123456789abcdef0123456789abcdef",
+        context_parentspanid: "aabbccddeeff0011",
+        _timestamp: 1640995200000000,
+      });
+      const card = wrapper.findComponent({ name: "TraceCorrelationCard" });
+      expect(card.exists()).toBe(true);
+      expect(card.props("traceId")).toBe("0123456789abcdef0123456789abcdef");
+      expect(card.props("spanId")).toBe("aabbccddeeff0011");
+    });
+
     it("shows the trace correlation card when the error carries _oo_trace_id", async () => {
       await seedErrorDetails({
         error_id: "err-1",
