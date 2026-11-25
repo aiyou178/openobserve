@@ -5457,6 +5457,8 @@ mod tests {
             "/api/v2/{org_id}/oncall/ack/voice/{token}",
             "/api/v2/{org_id}/workflows/hooks/{trigger_id}",
             "/api/v2/{org_id}/workflows/hooks/{trigger_id}/runs/{run_id}",
+            "/auth/oidc/bootstrap",
+            "/auth/oidc/logout",
             "/azure",
             "/docs",
             "/healthz",
