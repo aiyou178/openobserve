@@ -25,7 +25,7 @@ for revision in [args.old_revision, args.new_revision]:
     if len(revision) != 40 or any(char not in '0123456789abcdef' for char in revision):
         raise SystemExit('Full source commit revisions are required')
 def source_url(revision, archive):
-    pattern = r"openobserve-source-" + re.escape(revision) + r"-v1\.1\.2\.[1-9][0-9]*\.tar\.gz"
+    pattern = r"openobserve-source-" + re.escape(revision) + r"-v[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]*\.tar\.gz"
     if not re.fullmatch(pattern, archive.name):
         raise SystemExit('Source archives must retain their revision and version in the package filename')
     return base + '/web/assets/' + archive.name

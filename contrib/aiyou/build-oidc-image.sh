@@ -17,8 +17,8 @@ toolchain=${OIDC_RUST_TOOLCHAIN:-$toolchain_pin}
 jobs=${OIDC_BUILD_JOBS:-1}
 requested_minimum_gb=${OIDC_MIN_FREE_GB:-}
 stop_gb=5
-if [[ ! "$version" =~ ^v1\.1\.2\.[1-9][0-9]*$ || ! "$toolchain" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  echo "Expected version v1.1.2.N and a dated nightly-YYYY-MM-DD toolchain" >&2
+if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[1-9][0-9]*$ || ! "$toolchain" =~ ^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "Expected fork version vMAJOR.MINOR.PATCH.N (N >= 1) and a dated nightly-YYYY-MM-DD toolchain" >&2
   exit 1
 fi
 if [[ ! "$jobs" =~ ^[1-9][0-9]*$ || ( -n "$requested_minimum_gb" && ! "$requested_minimum_gb" =~ ^[1-9][0-9]*$ ) ]]; then
